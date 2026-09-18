@@ -1,9 +1,12 @@
 'use client';
 
-// Tasks 4/5/6/7 — Full appraisal tool
-// Phases: upload → processing → done → questionnaire → offer
+// Full appraisal tool
+// Phases: upload → processing → done → questionnaire → offer → submitted
 // Pipeline: identify → grade → valuate → offer (concurrent per image)
 // Questionnaire: grade adjustment applied to produce adjusted_offer per book
+// Submission: /api/submit mints the ONE reference number for the session and
+// returns the PDF + CSV under it. The report is issued with the submission,
+// never before it, so a session can never carry two numbers (WO-02).
 
 import { useCallback, useState } from 'react';
 import UploadComponent from '@/components/upload';
@@ -18,6 +21,7 @@ import type { ValuationResult } from '@/lib/schemas/valuation';
 import type { OfferResult } from '@/lib/schemas/offer';
 import type { SellerQuestionnaire } from '@/lib/schemas/questionnaire';
 import type { CollectionSummary } from '@/lib/schemas/offer';
+import type { ReportBook } from '@/lib/types/report';
 import {
   computeGradeAdjustment,
   applyAdjustmentToOffer,
@@ -153,10 +157,50 @@ function AdjustedOfferSummary({
         </p>
       )}
       <p className="text-center text-xs text-gray-400">
+        Your documented appraisal report (PDF and CSV) is issued with your submission.
+      </p>
+      <p className="text-center text-xs text-gray-400">
         Offer valid for {OFFER_VALIDITY_DAYS} days · Confirmation emailed to {questionnaire.email}
       </p>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Submission response shape (mirrors /api/submit)
+// ---------------------------------------------------------------------------
+
+interface SubmissionResult {
+  reference_number: string;
+  submitted_at: string;
+  generated_at: string;
+  summary: CollectionSummary;
+  pdf_base64: string;
+  csv: string;
+}
+
+/** Books that completed the full pipeline and have an adjusted offer. */
+function collectReportBooks(comics: ComicProcessingState[]): ReportBook[] {
+  const books: ReportBook[] = [];
+  for (const c of comics) {
+    if (
+      c.status === 'complete' &&
+      c.identification &&
+      c.condition &&
+      c.valuation &&
+      c.offer &&
+      c.adjusted_offer
+    ) {
+      books.push({
+        identification: c.identification,
+        condition: c.condition,
+        valuation: c.valuation,
+        offer: c.offer,
+        adjusted_offer: c.adjusted_offer,
+      });
+    }
+  }
+  return books;
 }
 
 // ---------------------------------------------------------------------------
@@ -170,15 +214,9 @@ export default function AppraisePage() {
   const [questionnaire, setQuestionnaire] = useState<SellerQuestionnaire | null>(null);
   const [adjustment, setAdjustment] = useState<GradeAdjustment | null>(null);
   const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'error'>('idle');
-  const [submissionRef, setSubmissionRef] = useState<string | null>(null);
-  const [reportLoading, setReportLoading] = useState(false);
-  const [reportResult, setReportResult] = useState<{
-    reference_number: string;
-    generated_at: string;
-    summary: CollectionSummary;
-    pdf_base64: string;
-    csv: string;
-  } | null>(null);
+  /** The server's response to /api/submit — the single source of the
+   *  reference number and the report rendered on the confirmation screen. */
+  const [submission, setSubmission] = useState<SubmissionResult | null>(null);
 
   const updateComic = useCallback(
     (id: string, patch: Partial<ComicProcessingState>) => {
@@ -291,81 +329,27 @@ export default function AppraisePage() {
     setComics([]);
     setQuestionnaire(null);
     setAdjustment(null);
-    setReportResult(null);
-    setReportLoading(false);
     setSubmitState('idle');
-    setSubmissionRef(null);
+    setSubmission(null);
   }
 
   async function handleFormalSubmit() {
     if (!questionnaire || !adjustment) return;
-    const books = comics
-      .filter(
-        (c) =>
-          c.status === 'complete' &&
-          c.identification &&
-          c.condition &&
-          c.valuation &&
-          c.offer &&
-          c.adjusted_offer,
-      )
-      .map((c) => ({
-        identification: c.identification!,
-        condition: c.condition!,
-        valuation: c.valuation!,
-        offer: c.offer!,
-        adjusted_offer: c.adjusted_offer!,
-      }));
+    const books = collectReportBooks(comics);
     if (books.length === 0) return;
     setSubmitState('submitting');
     try {
-      const result = await apiPost<{ reference_number: string; submitted_at: string }>(
-        '/api/submit',
-        { seller: questionnaire, adjustment, books },
-      );
-      setSubmissionRef(result.reference_number);
+      const result = await apiPost<SubmissionResult>('/api/submit', {
+        seller: questionnaire,
+        adjustment,
+        books,
+      });
+      setSubmission(result);
       setPhase('submitted');
       setSubmitState('idle');
     } catch (err) {
       console.error('Formal submission failed:', err);
       setSubmitState('error');
-    }
-  }
-
-  async function handleGenerateReport() {
-    if (!questionnaire || !adjustment) return;
-    const books = comics
-      .filter(
-        (c) =>
-          c.status === 'complete' &&
-          c.identification &&
-          c.condition &&
-          c.valuation &&
-          c.offer &&
-          c.adjusted_offer,
-      )
-      .map((c) => ({
-        identification: c.identification!,
-        condition: c.condition!,
-        valuation: c.valuation!,
-        offer: c.offer!,
-        adjusted_offer: c.adjusted_offer!,
-      }));
-    if (books.length === 0) return;
-    setReportLoading(true);
-    try {
-      const result = await apiPost<{
-        reference_number: string;
-        generated_at: string;
-        summary: CollectionSummary;
-        pdf_base64: string;
-        csv: string;
-      }>('/api/generate-report', { seller: questionnaire, adjustment, books });
-      setReportResult(result);
-    } catch (err) {
-      console.error('Report generation failed:', err);
-    } finally {
-      setReportLoading(false);
     }
   }
 
@@ -516,148 +500,120 @@ export default function AppraisePage() {
             </div>
           </div>
 
-          {/* Report generation */}
-          <div className="mt-6">
-            {!reportResult ? (
-              <button
-                type="button"
-                onClick={handleGenerateReport}
-                disabled={reportLoading}
-                className="w-full rounded-md bg-gray-800 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-gray-900 disabled:cursor-wait disabled:opacity-60"
-              >
-                {reportLoading ? 'Generating report…' : 'Generate Appraisal Report'}
-              </button>
-            ) : (
-              <>
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-                  <div>
-                    <p className="text-xs text-gray-500">Report reference</p>
-                    <p className="font-mono text-sm font-semibold text-gray-900">
-                      {reportResult.reference_number}
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        downloadFile(
-                          reportResult.pdf_base64,
-                          `${reportResult.reference_number}.pdf`,
-                          'application/pdf',
-                        )
-                      }
-                      className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
-                    >
-                      Download PDF
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        downloadFile(
-                          reportResult.csv,
-                          `${reportResult.reference_number}.csv`,
-                          'text/csv',
-                        )
-                      }
-                      className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
-                    >
-                      Download CSV
-                    </button>
-                  </div>
-                </div>
-                <div className="mt-6">
-                  <AppraisalReport
-                    data={{
-                      reference_number: reportResult.reference_number,
-                      generated_at: reportResult.generated_at,
-                      seller: questionnaire,
-                      adjustment,
-                      summary: reportResult.summary,
-                      books: comics
-                        .filter(
-                          (c) =>
-                            c.status === 'complete' &&
-                            c.identification &&
-                            c.condition &&
-                            c.valuation &&
-                            c.offer &&
-                            c.adjusted_offer,
-                        )
-                        .map((c) => ({
-                          identification: c.identification!,
-                          condition: c.condition!,
-                          valuation: c.valuation!,
-                          offer: c.offer!,
-                          adjusted_offer: c.adjusted_offer!,
-                        })),
-                    }}
-                  />
-                </div>
-              </>
-            )}
-          </div>
         </>
       )}
+
       {/* SUBMITTED */}
-      {phase === 'submitted' && submissionRef && (
-        <div className="mx-auto max-w-lg text-center">
-          {/* Checkmark */}
-          <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
-            <svg
-              className="h-8 w-8 text-green-600"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
+      {phase === 'submitted' && submission && questionnaire && adjustment && (
+        <div className="mx-auto max-w-4xl">
+          <div className="mx-auto max-w-lg text-center">
+            {/* Checkmark */}
+            <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+              <svg
+                className="h-8 w-8 text-green-600"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
 
-          <h2 className="mb-2 text-2xl font-bold text-gray-900">Submission Confirmed</h2>
-          <p className="mb-6 text-sm text-gray-600">
-            A confirmation has been emailed to{' '}
-            <span className="font-medium text-gray-800">{questionnaire?.email}</span>.
-          </p>
-
-          {/* Reference number */}
-          <div className="mb-8 rounded-lg border border-gray-200 bg-gray-50 px-6 py-4">
-            <p className="mb-1 text-xs text-gray-500">Your reference number</p>
-            <p className="font-mono text-xl font-bold text-gray-900">{submissionRef}</p>
-            <p className="mt-1 text-xs text-gray-400">
-              Keep this for your records. Offer valid for {OFFER_VALIDITY_DAYS} days.
+            <h2 className="mb-2 text-2xl font-bold text-gray-900">Submission Confirmed</h2>
+            <p className="mb-6 text-sm text-gray-600">
+              A confirmation has been emailed to{' '}
+              <span className="font-medium text-gray-800">{questionnaire.email}</span>.
             </p>
+
+            {/* Reference number */}
+            <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 px-6 py-4">
+              <p className="mb-1 text-xs text-gray-500">Your reference number</p>
+              <p className="font-mono text-xl font-bold text-gray-900">
+                {submission.reference_number}
+              </p>
+              <p className="mt-1 text-xs text-gray-400">
+                Keep this for your records. Offer valid for {OFFER_VALIDITY_DAYS} days.
+              </p>
+            </div>
+
+            {/* Report downloads — issued under the same reference number */}
+            <div className="mb-8 flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  downloadFile(
+                    submission.pdf_base64,
+                    `${submission.reference_number}.pdf`,
+                    'application/pdf',
+                  )
+                }
+                className="rounded-md bg-gray-800 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-gray-900"
+              >
+                Download Appraisal Report (PDF)
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  downloadFile(
+                    submission.csv,
+                    `${submission.reference_number}.csv`,
+                    'text/csv',
+                  )
+                }
+                className="rounded-md bg-white px-4 py-2 text-xs font-semibold text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+              >
+                Download Inventory (CSV)
+              </button>
+            </div>
+
+            {/* Next steps */}
+            <div className="mb-8 rounded-lg bg-blue-50 px-6 py-5 text-left ring-1 ring-blue-100">
+              <h3 className="mb-4 text-sm font-semibold text-blue-900">What happens next</h3>
+              <ol className="space-y-3">
+                {[
+                  ['Review', 'Our team reviews your appraisal within 1–2 business days.'],
+                  ['Schedule', 'We contact you to arrange a convenient pickup time.'],
+                  ['Payment', 'We pay same-day when we collect the books.'],
+                ].map(([title, body], i) => (
+                  <li key={i} className="flex gap-3">
+                    <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
+                      {i + 1}
+                    </span>
+                    <span className="text-sm text-blue-800">
+                      <span className="font-semibold">{title}: </span>
+                      {body}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            </div>
+
+          {/* On-screen copy of the report, rendered from the server response */}
+          <div className="mt-4">
+            <AppraisalReport
+              data={{
+                reference_number: submission.reference_number,
+                generated_at: submission.generated_at,
+                seller: questionnaire,
+                adjustment,
+                summary: submission.summary,
+                books: collectReportBooks(comics),
+              }}
+            />
           </div>
 
-          {/* Next steps */}
-          <div className="mb-8 rounded-lg bg-blue-50 px-6 py-5 text-left ring-1 ring-blue-100">
-            <h3 className="mb-4 text-sm font-semibold text-blue-900">What happens next</h3>
-            <ol className="space-y-3">
-              {[
-                ['Review', 'Our team reviews your appraisal within 1–2 business days.'],
-                ['Schedule', 'We contact you to arrange a convenient pickup time.'],
-                ['Payment', 'We pay same-day when we collect the books.'],
-              ].map(([title, body], i) => (
-                <li key={i} className="flex gap-3">
-                  <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
-                    {i + 1}
-                  </span>
-                  <span className="text-sm text-blue-800">
-                    <span className="font-semibold">{title}: </span>
-                    {body}
-                  </span>
-                </li>
-              ))}
-            </ol>
+          <div className="mt-10 text-center">
+            <button
+              type="button"
+              onClick={handleStartOver}
+              className="text-sm font-medium text-gray-500 hover:text-gray-700"
+            >
+              ← Appraise another collection
+            </button>
           </div>
-
-          <button
-            type="button"
-            onClick={handleStartOver}
-            className="text-sm font-medium text-gray-500 hover:text-gray-700"
-          >
-            ← Appraise another collection
-          </button>
         </div>
       )}
     </main>

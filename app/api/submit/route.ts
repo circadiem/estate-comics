@@ -1,6 +1,10 @@
-// Task 9 — Final submission endpoint
-// Accepts the full appraisal payload, generates PDF + CSV, sends seller
-// confirmation and internal notification emails, returns the reference number.
+// Final submission endpoint — the CANONICAL reference-number minting point.
+//
+// Accepts the full appraisal payload, mints exactly one reference number,
+// builds the collection summary, generates the PDF + CSV under that number,
+// sends the seller confirmation and internal notification, and returns the
+// reference number together with the report so the browser can offer the
+// download. No other route mints reference numbers (WO-02).
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -14,6 +18,7 @@ import { buildCollectionSummary } from '@/lib/services/offer';
 import { generatePDF } from '@/lib/services/pdf-generator';
 import { generateCSV } from '@/lib/services/csv-generator';
 import { sendSellerConfirmation, sendInternalNotification } from '@/lib/services/email';
+import type { ReportData } from '@/lib/types/report';
 
 const GradeAdjustmentSchema = z.object({
   fmv_multiplier: z.number(),
@@ -52,11 +57,21 @@ export async function POST(request: NextRequest) {
   }
 
   const { seller, adjustment, books } = parsed.data;
+
+  // Minted once. This exact value flows into the summary, the PDF, the CSV,
+  // both emails, and the response the confirmation screen renders from.
   const reference_number = generateReferenceNumber();
   const submitted_at = new Date().toISOString();
   const summary = buildCollectionSummary(books, reference_number);
 
-  const reportData = { reference_number, generated_at: submitted_at, seller, adjustment, summary, books };
+  const reportData: ReportData = {
+    reference_number,
+    generated_at: submitted_at,
+    seller,
+    adjustment,
+    summary,
+    books,
+  };
 
   // Generate PDF and CSV concurrently
   let pdfBuffer: Buffer;
@@ -83,5 +98,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ reference_number, submitted_at });
+  return NextResponse.json({
+    reference_number,
+    submitted_at,
+    generated_at: submitted_at,
+    summary,
+    pdf_base64: pdfBuffer.toString('base64'),
+    csv,
+  });
 }

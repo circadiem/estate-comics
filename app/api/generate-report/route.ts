@@ -1,6 +1,10 @@
-// Task 8 — PDF & CSV generation endpoint
-// Accepts pipeline results + questionnaire, generates reference number,
-// builds collection summary, returns PDF (base64), CSV string, and summary.
+// Report re-render endpoint.
+//
+// Renders the PDF + CSV for an appraisal under an EXISTING reference number.
+// This route never mints: the reference number is a required, validated input
+// (WO-02). The seller flow no longer calls it — /api/submit issues the report
+// with the submission — but it remains for re-generating a report under the
+// same number (admin review queue, WO-12).
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -9,10 +13,11 @@ import { IdentificationResultSchema } from '@/lib/schemas/identification';
 import { ConditionResultSchema } from '@/lib/schemas/condition';
 import { ValuationResultSchema } from '@/lib/schemas/valuation';
 import { OfferResultSchema } from '@/lib/schemas/offer';
-import { generateReferenceNumber } from '@/lib/utils/reference-number';
+import { REFERENCE_NUMBER_REGEX } from '@/lib/utils/reference-number';
 import { buildCollectionSummary } from '@/lib/services/offer';
 import { generatePDF } from '@/lib/services/pdf-generator';
 import { generateCSV } from '@/lib/services/csv-generator';
+import type { ReportData } from '@/lib/types/report';
 
 const GradeAdjustmentSchema = z.object({
   fmv_multiplier: z.number(),
@@ -29,6 +34,9 @@ const ReportBookSchema = z.object({
 });
 
 const RequestBodySchema = z.object({
+  reference_number: z
+    .string()
+    .regex(REFERENCE_NUMBER_REGEX, 'reference_number must match EC-YYYYMMDD-XXXX'),
   seller: SellerQuestionnaireSchema,
   adjustment: GradeAdjustmentSchema,
   books: z.array(ReportBookSchema).min(1),
@@ -50,12 +58,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { seller, adjustment, books } = parsed.data;
-  const reference_number = generateReferenceNumber();
+  const { reference_number, seller, adjustment, books } = parsed.data;
   const generated_at = new Date().toISOString();
   const summary = buildCollectionSummary(books, reference_number);
 
-  const reportData = { reference_number, generated_at, seller, adjustment, summary, books };
+  const reportData: ReportData = {
+    reference_number,
+    generated_at,
+    seller,
+    adjustment,
+    summary,
+    books,
+  };
 
   let pdfBuffer: Buffer;
   let csv: string;

@@ -1,9 +1,22 @@
-// Reference number generator
-// Format: TCB-YYYYMMDD-XXXX  (e.g., TCB-20260302-A4F2)
+// Reference number generator and validator
+// Format: EC-YYYYMMDD-XXXX  (e.g., EC-20260918-A4F2)
 // XXXX = 4-character uppercase hex for uniqueness within a day.
+//
+// ONE reference number per appraisal session. `/api/submit` is the canonical
+// minting point; every other surface (PDF, CSV, on-screen confirmation, both
+// emails) carries the number it minted. Nothing else may call
+// generateReferenceNumber() for seller-facing output.
 
-export function generateReferenceNumber(): string {
-  const now = new Date();
+export const REFERENCE_NUMBER_PREFIX = 'EC';
+
+/** Strict shape check. Prefix, 8-digit date, dash, 4 uppercase hex chars. */
+export const REFERENCE_NUMBER_REGEX = /^EC-\d{8}-[0-9A-F]{4}$/;
+
+export function isValidReferenceNumber(value: string): boolean {
+  return REFERENCE_NUMBER_REGEX.test(value);
+}
+
+export function generateReferenceNumber(now: Date = new Date()): string {
   const date = [
     now.getFullYear(),
     String(now.getMonth() + 1).padStart(2, '0'),
@@ -15,5 +28,5 @@ export function generateReferenceNumber(): string {
     .toUpperCase()
     .padStart(4, '0');
 
-  return `TCB-${date}-${suffix}`;
+  return `${REFERENCE_NUMBER_PREFIX}-${date}-${suffix}`;
 }
