@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Nav from '@/components/nav';
 import Footer from '@/components/footer';
+import { cormorant, nunito } from './fonts';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -15,7 +16,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    // Provenance font variables (--font-cormorant, --font-nunito) are exposed
+    // here so any surface can use them; no existing component is restyled yet.
+    <html lang="en" className={`${cormorant.variable} ${nunito.variable}`}>
       <body className="min-h-screen bg-white text-gray-900 antialiased">
         <Nav />
         {children}

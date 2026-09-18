@@ -1,13 +1,14 @@
-// Task 9 — Transactional email service via Resend
+// Transactional email service via Resend — Provenance treatment
 // Templates: seller confirmation (offer summary + next steps)
 //            internal notification (full details + PDF/CSV attachments)
-// Source: Implementation Spec §XI
+// Source: Implementation Spec §XI; brand: docs/04-brand-provenance.md
 
 import { Resend } from 'resend';
 import type { ReportData } from '@/lib/types/report';
 import { MIN_COLLECTION_SIZE, OFFER_VALIDITY_DAYS } from '@/lib/config/constants';
 import { isBelowMinimum } from '@/lib/utils/collection-size';
 import { selectHiddenGems } from '@/lib/services/offer';
+import { provenance } from '@/design/tailwind.tokens';
 
 // ---------------------------------------------------------------------------
 // Client (lazy — only instantiated on first use so missing key = runtime err)
@@ -34,19 +35,45 @@ function getEmailConfig(): { from: string; intake: string } {
 }
 
 // ---------------------------------------------------------------------------
+// Provenance email shell
+//
+// Every colour below is a token from design/tailwind.tokens.ts. Fonts: the
+// brand families are requested via a <link> for clients that honour it (Apple
+// Mail, iOS); everything else falls back to Georgia (display) and the system
+// sans (body), which is the fallback stack the tokens define. Layout is
+// table-based inline CSS for client compatibility. No shadows, no gradients,
+// 2px radius, antique-gold hairlines as the only structural device.
+// ---------------------------------------------------------------------------
+
+const c = provenance.colors;
+const DISPLAY = `'Cormorant Garamond', Georgia, 'Times New Roman', serif`;
+const BODY = `'Nunito Sans', system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif`;
+const FONT_LINK =
+  '<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,400&family=Nunito+Sans:wght@400;600;700&display=swap" rel="stylesheet">';
+
+const TAGLINE = 'Every collection has a story. We honor it.';
+const FOOTER_LINE = 'Estate Comics · Powered by Legends of Superheros · Est. 1993';
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Escape seller-supplied text before it lands in HTML. */
+function esc(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function fmt(n: number): string {
-  return n < 1 ? `$${n.toFixed(2)}` : `$${Math.round(n).toLocaleString()}`;
+  return n < 1 ? `$${n.toFixed(2)}` : `$${Math.round(n).toLocaleString('en-US')}`;
 }
 
 function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+  return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 function offerExpiry(submittedAt: string): string {
@@ -55,122 +82,47 @@ function offerExpiry(submittedAt: string): string {
   return fmtDate(d.toISOString());
 }
 
-// ---------------------------------------------------------------------------
-// Seller confirmation template
-// ---------------------------------------------------------------------------
+const textBody = `font-family:${BODY};font-size:16px;line-height:1.65;color:${c.charcoalBrown};`;
+const textSm = `font-family:${BODY};font-size:14px;line-height:1.55;color:${c.umber};`;
+const textLabel = `font-family:${BODY};font-size:13px;line-height:1.4;font-weight:600;color:${c.umber};`;
+const refStyle = `font-family:${BODY};font-size:15px;font-weight:600;letter-spacing:0.04em;color:${c.charcoalBrown};`;
+const h2 = `font-family:${DISPLAY};font-size:23px;line-height:1.3;font-weight:600;color:${c.darkUmber};margin:0;`;
+const hairline = `<tr><td style="height:1px;background:${c.antiqueGold};font-size:0;line-height:0;">&nbsp;</td></tr>`;
 
-function sellerConfirmationHtml(data: ReportData): string {
-  const { reference_number, generated_at, seller, summary } = data;
-  const hiddenGems = summary.hidden_gems_count;
+function wordmark(): string {
+  return `
+    <tr><td style="height:4px;background:${c.darkUmber};font-size:0;line-height:0;">&nbsp;</td></tr>
+    <tr><td align="center" style="padding:28px 40px 22px;">
+      <div style="font-family:${DISPLAY};font-size:27px;line-height:1;font-weight:700;color:${c.charcoalBrown};letter-spacing:-0.01em;">EstateComics</div>
+      <div style="width:150px;height:1px;background:${c.antiqueGold};margin:9px auto 8px;font-size:0;line-height:0;">&nbsp;</div>
+      <div style="font-family:${DISPLAY};font-style:italic;font-size:13px;color:${c.patina};letter-spacing:0.02em;">Professional Comic Book Estate Services</div>
+    </td></tr>`;
+}
 
+function footer(extra: string): string {
+  return `
+    <tr><td style="padding:20px 40px 26px;border-top:1px solid ${c.bisque};">
+      <p style="margin:0 0 4px;font-family:${DISPLAY};font-style:italic;font-size:15px;color:${c.patina};text-align:center;">${TAGLINE}</p>
+      <p style="margin:0;font-family:${BODY};font-size:12px;line-height:1.5;color:${c.patina};text-align:center;">${FOOTER_LINE}<br>${extra}</p>
+    </td></tr>`;
+}
+
+function shell(title: string, width: number, inner: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:40px 0;">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>${esc(title)}</title>
+${FONT_LINK}
+</head>
+<body style="margin:0;padding:0;background:${c.vellum};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${c.vellum};padding:32px 12px;">
     <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.1);">
-
-        <!-- Header -->
-        <tr><td style="background:#111827;padding:32px 40px;">
-          <p style="margin:0;color:#9ca3af;font-size:12px;letter-spacing:.08em;text-transform:uppercase;">TheComicBuyers.com</p>
-          <h1 style="margin:8px 0 0;color:#ffffff;font-size:24px;font-weight:700;">Appraisal Submitted</h1>
-        </td></tr>
-
-        <!-- Body -->
-        <tr><td style="padding:32px 40px;">
-          <p style="margin:0 0 24px;color:#374151;font-size:15px;">Hi ${seller.name},</p>
-          <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.6;">
-            Thank you for submitting your comic book collection for appraisal. We've received
-            your information and our team will be in touch within <strong>1–2 business days</strong>
-            to discuss next steps.
-          </p>
-
-          <!-- Reference -->
-          <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:24px;">
-            <tr><td style="padding:16px 20px;">
-              <p style="margin:0 0 4px;color:#6b7280;font-size:12px;">Reference Number</p>
-              <p style="margin:0;color:#111827;font-size:18px;font-weight:700;font-family:monospace;">${reference_number}</p>
-              <p style="margin:4px 0 0;color:#6b7280;font-size:12px;">Submitted ${fmtDate(generated_at)}</p>
-            </td></tr>
-          </table>
-
-          <!-- Offer summary -->
-          <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;margin-bottom:24px;">
-            <tr><td style="padding:20px;">
-              <p style="margin:0 0 4px;color:#166534;font-size:13px;font-weight:600;">Estimated Cash Offer</p>
-              <p style="margin:0 0 4px;color:#14532d;font-size:28px;font-weight:800;">${fmt(summary.total_offer_low)} – ${fmt(summary.total_offer_high)}</p>
-              <p style="margin:0;color:#15803d;font-size:12px;">Based on ${summary.total_books_identified} identified book${summary.total_books_identified !== 1 ? 's · ' : ' · '}FMV estimate ${fmt(summary.total_fmv_low)}–${fmt(summary.total_fmv_high)}</p>
-            </td></tr>
-          </table>
-
-          <!-- Collection highlights -->
-          <table width="100%" cellpadding="12" cellspacing="0" style="margin-bottom:24px;">
-            <tr>
-              <td width="33%" align="center" style="border:1px solid #e5e7eb;border-radius:6px;">
-                <p style="margin:0;color:#6b7280;font-size:11px;">Books Identified</p>
-                <p style="margin:4px 0 0;color:#111827;font-size:20px;font-weight:700;">${summary.total_books_identified}</p>
-              </td>
-              <td width="4%"></td>
-              <td width="30%" align="center" style="border:1px solid #e5e7eb;border-radius:6px;">
-                <p style="margin:0;color:#6b7280;font-size:11px;">Key Issues</p>
-                <p style="margin:4px 0 0;color:#111827;font-size:20px;font-weight:700;">${summary.key_issues_count}</p>
-              </td>
-              <td width="4%"></td>
-              <td width="29%" align="center" style="border:1px solid #e5e7eb;border-radius:6px;">
-                <p style="margin:0;color:#6b7280;font-size:11px;">Hidden Gems</p>
-                <p style="margin:4px 0 0;color:#111827;font-size:20px;font-weight:700;">${hiddenGems}</p>
-              </td>
-            </tr>
-          </table>
-
-          <!-- Next steps -->
-          <h2 style="margin:0 0 12px;color:#111827;font-size:15px;font-weight:700;">What happens next</h2>
-          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
-            ${[
-              ['1', 'Our team reviews your appraisal', "We'll verify the AI identification and valuation within 1\u20132 business days."],
-              ['2', 'We contact you to schedule', 'A team member will call or email to arrange a convenient pickup time.'],
-              ['3', 'Verification and payment', 'We verify the books in person when we collect them, then pay within 48 hours by your preferred method. Offers are contingent on that inspection and valid for 14 days.'],
-            ]
-              .map(
-                ([num, title, body]) => `
-            <tr><td style="padding:8px 0;border-bottom:1px solid #f3f4f6;">
-              <table cellpadding="0" cellspacing="0"><tr>
-                <td width="32" valign="top" style="padding-top:2px;">
-                  <span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:#111827;color:#fff;font-size:11px;font-weight:700;text-align:center;line-height:24px;">${num}</span>
-                </td>
-                <td style="padding-left:12px;">
-                  <p style="margin:0 0 2px;color:#111827;font-size:13px;font-weight:600;">${title}</p>
-                  <p style="margin:0;color:#6b7280;font-size:12px;">${body}</p>
-                </td>
-              </tr></table>
-            </td></tr>`,
-              )
-              .join('')}
-          </table>
-
-          <!-- Offer validity -->
-          <table width="100%" cellpadding="0" cellspacing="0" style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;margin-bottom:32px;">
-            <tr><td style="padding:12px 16px;">
-              <p style="margin:0;color:#92400e;font-size:12px;">
-                <strong>Offer valid until ${offerExpiry(generated_at)}.</strong>
-                This estimate is contingent on in-person verification of condition and authenticity.
-              </p>
-            </td></tr>
-          </table>
-
-          <p style="margin:0 0 4px;color:#374151;font-size:13px;">Questions? Reply to this email or call us at <strong>(800) 555-COMIC</strong>.</p>
-          <p style="margin:0;color:#374151;font-size:13px;">— The TheComicBuyers Team</p>
-        </td></tr>
-
-        <!-- Footer -->
-        <tr><td style="background:#f9fafb;padding:20px 40px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#9ca3af;font-size:11px;text-align:center;">
-            TheComicBuyers.com · New England &amp; Mid-Atlantic · South Florida<br>
-            This offer is non-binding and subject to in-person review.
-          </p>
-        </td></tr>
-
+      <table role="presentation" width="${width}" cellpadding="0" cellspacing="0" style="max-width:${width}px;width:100%;background:${c.ivory};border:1px solid ${c.bisque};border-radius:2px;">
+        ${wordmark()}
+        ${inner}
       </table>
     </td></tr>
   </table>
@@ -178,139 +130,245 @@ function sellerConfirmationHtml(data: ReportData): string {
 </html>`;
 }
 
+/** Ivory card with the antique-gold top rule. */
+function statCard(label: string, figure: string, sub?: string): string {
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ${c.bisque};border-top:2px solid ${c.antiqueGold};border-radius:2px;background:${c.ivory};">
+      <tr><td style="padding:16px 18px;">
+        <div style="${textLabel}font-weight:400;">${label}</div>
+        <div style="font-family:${DISPLAY};font-size:29px;line-height:1.1;font-weight:600;color:${c.darkUmber};margin-top:4px;">${figure}</div>
+        ${sub ? `<div style="${textSm}margin-top:4px;">${sub}</div>` : ''}
+      </td></tr>
+    </table>`;
+}
+
+function sectionHead(text: string): string {
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 12px;">
+      <tr><td style="padding-bottom:6px;"><h2 style="${h2}">${text}</h2></td></tr>
+      ${hairline}
+    </table>`;
+}
+
+/** Key/value rows: label umber, value charcoal, zebra vellum/bisque. */
+function kvTable(rows: [string, string][]): string {
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ${c.bisque};border-radius:2px;">
+      ${rows
+        .map(
+          ([k, v], i) => `<tr style="background:${i % 2 ? c.bisque : c.vellum};">
+        <td style="padding:9px 14px;width:40%;${textSm}">${k}</td>
+        <td style="padding:9px 14px;${textBody}font-size:14px;">${v}</td>
+      </tr>`,
+        )
+        .join('')}
+    </table>`;
+}
+
 // ---------------------------------------------------------------------------
-// Internal notification template
+// Seller confirmation
 // ---------------------------------------------------------------------------
 
-function internalNotificationHtml(data: ReportData): string {
+export function renderSellerConfirmationHtml(data: ReportData): string {
+  const { reference_number, generated_at, seller, summary } = data;
+  const gems = summary.hidden_gems_count;
+  const steps: [string, string][] = [
+    ['We review your appraisal', 'A member of our team checks every identification and value within 1–2 business days.'],
+    ['We arrange a time', 'We call or email to schedule a collection time that suits you.'],
+    ['Verification and payment', 'We verify the books in person when we collect them, then pay within 48 hours by your preferred method. Offers are contingent on that inspection and valid for 14 days.'],
+  ];
+
+  const inner = `
+    <tr><td style="padding:8px 40px 0;">
+      <p style="${textBody}margin:0 0 20px;">Dear ${esc(seller.name)},</p>
+      <p style="${textBody}margin:0 0 24px;">
+        Thank you for entrusting us with your collection. We have received your submission and
+        the appraisal report is attached to your download; the same figures are summarised below.
+      </p>
+
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${c.vellum};border:1px solid ${c.bisque};border-radius:2px;margin-bottom:20px;">
+        <tr><td style="padding:14px 18px;">
+          <div style="${textLabel}">Reference number</div>
+          <div style="${refStyle}margin-top:2px;">${reference_number}</div>
+          <div style="${textSm}margin-top:2px;">Submitted ${fmtDate(generated_at)}</div>
+        </td></tr>
+      </table>
+
+      ${statCard(
+        'Cash offer range',
+        `${fmt(summary.total_offer_low)} – ${fmt(summary.total_offer_high)}`,
+        `Based on ${summary.total_books_identified} identified ${summary.total_books_identified === 1 ? 'book' : 'books'} · fair market value ${fmt(summary.total_fmv_low)} – ${fmt(summary.total_fmv_high)}`,
+      )}
+
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;border:1px solid ${c.bisque};border-radius:2px;">
+        <tr>
+          <td width="34%" style="padding:12px 14px;border-right:1px solid ${c.bisque};">
+            <div style="${textLabel}font-weight:400;">Books appraised</div>
+            <div style="font-family:${DISPLAY};font-size:23px;font-weight:600;color:${c.darkUmber};">${summary.total_books_identified}</div>
+          </td>
+          <td width="33%" style="padding:12px 14px;border-right:1px solid ${c.bisque};">
+            <div style="${textLabel}font-weight:400;">Key issues</div>
+            <div style="font-family:${DISPLAY};font-size:23px;font-weight:600;color:${c.darkUmber};">${summary.key_issues_count}</div>
+          </td>
+          <td width="33%" style="padding:12px 14px;">
+            <div style="${textLabel}font-weight:400;">Hidden gems</div>
+            <div style="font-family:${DISPLAY};font-size:23px;font-weight:600;color:${c.darkUmber};">${gems}</div>
+          </td>
+        </tr>
+      </table>
+
+      ${sectionHead('What happens next')}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        ${steps
+          .map(
+            ([title, body], i) => `
+        <tr>
+          <td valign="top" width="36" style="padding:6px 0 14px;">
+            <div style="width:24px;height:24px;border-radius:2px;background:${c.darkUmber};color:${c.vellum};font-family:${BODY};font-size:12px;font-weight:700;text-align:center;line-height:24px;">${i + 1}</div>
+          </td>
+          <td valign="top" style="padding:6px 0 14px;">
+            <div style="${textBody}font-size:15px;font-weight:600;">${title}</div>
+            <div style="${textSm}">${body}</div>
+          </td>
+        </tr>`,
+          )
+          .join('')}
+      </table>
+
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${c.bisque};border-radius:2px;margin:8px 0 28px;">
+        <tr><td style="padding:12px 16px;${textBody}font-size:14px;">
+          <strong>Offer valid until ${offerExpiry(generated_at)}.</strong>
+          Every figure in this appraisal is an estimate from photographs and is confirmed by physical inspection before any offer is final.
+        </td></tr>
+      </table>
+
+      <p style="${textBody}font-size:15px;margin:0 0 4px;">Questions at any point? Reply to this email — it reaches us directly.</p>
+      <p style="${textBody}font-size:15px;margin:0 0 28px;">— Estate Comics</p>
+    </td></tr>
+    ${footer('This appraisal is preliminary and subject to physical verification.')}`;
+
+  return shell(`Your appraisal — ${reference_number}`, 600, inner);
+}
+
+// ---------------------------------------------------------------------------
+// Internal notification
+// ---------------------------------------------------------------------------
+
+export function renderInternalNotificationHtml(data: ReportData): string {
   const { reference_number, generated_at, seller, adjustment, summary } = data;
   const below_minimum = isBelowMinimum(seller.estimated_count);
-  const keyBooks = data.books.filter((b) => b.adjusted_offer.tier === 'key_issues');
+  const keyBooks = data.books
+    .filter((b) => b.adjusted_offer.tier === 'key_issues')
+    .sort((a, b) => b.valuation.fmv_midpoint - a.valuation.fmv_midpoint);
   const hiddenGems = selectHiddenGems(data.books);
 
   const eraSummary = Object.entries(summary.breakdown_by_era)
-    .filter(([, count]) => count > 0)
-    .map(([era, count]) => `${era.charAt(0).toUpperCase() + era.slice(1)}: ${count}`)
+    .filter(([, n]) => n > 0)
+    .map(([era, n]) => `${era.charAt(0).toUpperCase() + era.slice(1)} ${n}`)
     .join(' · ');
-
   const topPubs = Object.entries(summary.breakdown_by_publisher)
     .sort(([, a], [, b]) => b - a)
     .slice(0, 5)
-    .map(([pub, count]) => `${pub} (${count})`)
+    .map(([pub, n]) => `${esc(pub)} (${n})`)
     .join(', ');
 
-  return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"></head>
-<body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:40px 0;">
-    <tr><td align="center">
-      <table width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.1);">
+  const flag = (on: boolean, yes: string, no = 'No') =>
+    on
+      ? `<span style="color:${c.mutedRed};font-weight:600;">${yes}</span>`
+      : `<span style="color:${c.charcoalBrown};">${no}</span>`;
 
-        <!-- Header -->
-        <tr><td style="background:#1e3a5f;padding:24px 32px;">
-          <p style="margin:0;color:#93c5fd;font-size:11px;letter-spacing:.08em;text-transform:uppercase;">Internal · New Submission</p>
-          <h1 style="margin:6px 0 0;color:#ffffff;font-size:20px;font-weight:700;">${reference_number}</h1>
-          <p style="margin:4px 0 0;color:#bfdbfe;font-size:13px;">${seller.name} · ${seller.city}, ${seller.state} · ${fmtDate(generated_at)}</p>
-        </td></tr>
+  const bookTable = (rows: string[], head: string[]) => `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-family:${BODY};font-size:13px;line-height:1.45;color:${c.charcoalBrown};">
+      <tr>${head.map((h, i) => `<th align="${i >= head.length - 2 ? 'right' : 'left'}" style="padding:6px 10px;font-weight:600;color:${c.darkUmber};border-bottom:1px solid ${c.antiqueGold};">${h}</th>`).join('')}</tr>
+      ${rows.join('')}
+    </table>`;
+  const cell = (v: string, right = false) =>
+    `<td align="${right ? 'right' : 'left'}" style="padding:8px 10px;${right ? 'white-space:nowrap;' : ''}">${v}</td>`;
 
-        <!-- Body -->
-        <tr><td style="padding:24px 32px;">
+  const inner = `
+    <tr><td style="padding:0 40px;">
+      <div style="${textLabel}text-transform:none;">Internal · New submission${below_minimum ? ` · <span style="color:${c.mutedRed};">below minimum</span>` : ''}</div>
+      <div style="font-family:${DISPLAY};font-size:30px;line-height:1.2;font-weight:600;color:${c.darkUmber};margin-top:4px;">${reference_number}</div>
+      <div style="${textSm}margin-top:2px;">${esc(seller.name)} · ${esc(seller.city)}, ${esc(seller.state)} · ${fmtDate(generated_at)}</div>
 
-          <!-- Offer -->
-          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
-            <tr>
-              <td width="48%" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:14px 16px;">
-                <p style="margin:0 0 2px;color:#166534;font-size:11px;font-weight:600;">TOTAL ADJUSTED OFFER</p>
-                <p style="margin:0;color:#14532d;font-size:22px;font-weight:800;">${fmt(summary.total_offer_low)} – ${fmt(summary.total_offer_high)}</p>
-              </td>
-              <td width="4%"></td>
-              <td width="48%" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:14px 16px;">
-                <p style="margin:0 0 2px;color:#6b7280;font-size:11px;font-weight:600;">TOTAL FMV ESTIMATE</p>
-                <p style="margin:0;color:#111827;font-size:22px;font-weight:700;">${fmt(summary.total_fmv_low)} – ${fmt(summary.total_fmv_high)}</p>
-              </td>
-            </tr>
-          </table>
-
-          <!-- Collection stats -->
-          <h2 style="margin:0 0 8px;color:#111827;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;">Collection</h2>
-          <table width="100%" cellpadding="6" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:20px;font-size:13px;">
-            <tr><td style="color:#6b7280;width:40%;">Total books</td><td style="color:#111827;font-weight:600;">${summary.total_books_identified}${summary.total_books_flagged > 0 ? ` (${summary.total_books_flagged} flagged)` : ''}</td></tr>
-            <tr style="background:#fff;"><td style="color:#6b7280;">Key issues</td><td style="color:#111827;font-weight:600;">${summary.key_issues_count}</td></tr>
-            <tr><td style="color:#6b7280;">Hidden gems</td><td style="color:#111827;font-weight:600;">${hiddenGems.length}</td></tr>
-            <tr style="background:#fff;"><td style="color:#6b7280;">Bulk lot</td><td style="color:#111827;font-weight:600;">${summary.bulk_lot_count}</td></tr>
-            <tr><td style="color:#6b7280;">Era breakdown</td><td style="color:#111827;">${eraSummary || 'N/A'}</td></tr>
-            <tr style="background:#fff;"><td style="color:#6b7280;">Top publishers</td><td style="color:#111827;">${topPubs || 'N/A'}</td></tr>
-          </table>
-
-          <!-- Seller info -->
-          <h2 style="margin:0 0 8px;color:#111827;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;">Seller</h2>
-          <table width="100%" cellpadding="6" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:20px;font-size:13px;">
-            <tr><td style="color:#6b7280;width:40%;">Name</td><td style="color:#111827;font-weight:600;">${seller.name}</td></tr>
-            <tr style="background:#fff;"><td style="color:#6b7280;">Email</td><td style="color:#111827;">${seller.email}</td></tr>
-            <tr><td style="color:#6b7280;">Phone</td><td style="color:#111827;">${seller.phone}</td></tr>
-            <tr style="background:#fff;"><td style="color:#6b7280;">Location</td><td style="color:#111827;">${seller.city}, ${seller.state} ${seller.zip}</td></tr>
-            <tr><td style="color:#6b7280;">Est. count</td><td style="color:#111827;">${seller.estimated_count} books</td></tr>
-            <tr style="background:#fff;"><td style="color:#6b7280;">Below minimum</td><td style="color:${below_minimum ? '#dc2626' : '#16a34a'};font-weight:600;">${below_minimum ? `YES — ${seller.estimated_count} of ${MIN_COLLECTION_SIZE} (soft gate, operator decides)` : 'No'}</td></tr>
-            <tr><td style="color:#6b7280;">Pickup</td><td style="color:#111827;">${seller.pickup_available ? 'Available' : 'Seller delivers'}</td></tr>
-            <tr style="background:#fff;"><td style="color:#6b7280;">Timeline</td><td style="color:#111827;">${seller.timeline}</td></tr>
-            ${seller.notes ? `<tr><td style="color:#6b7280;">Notes</td><td style="color:#111827;">${seller.notes}</td></tr>` : ''}
-          </table>
-
-          <!-- Storage & adjustment -->
-          <h2 style="margin:0 0 8px;color:#111827;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;">Storage & Adjustment</h2>
-          <table width="100%" cellpadding="6" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:20px;font-size:13px;">
-            <tr><td style="color:#6b7280;width:40%;">Storage type</td><td style="color:#111827;">${seller.storage_type}</td></tr>
-            <tr style="background:#fff;"><td style="color:#6b7280;">Storage location</td><td style="color:#111827;">${seller.storage_location}</td></tr>
-            <tr><td style="color:#6b7280;">FMV multiplier</td><td style="color:#111827;font-weight:600;">×${adjustment.fmv_multiplier.toFixed(3)}</td></tr>
-            <tr style="background:#fff;"><td style="color:#6b7280;">Restoration flag</td><td style="color:${adjustment.restoration_flag ? '#dc2626' : '#16a34a'};font-weight:600;">${adjustment.restoration_flag ? 'YES — review required' : 'No'}</td></tr>
-          </table>
-
-          ${
-            keyBooks.length > 0
-              ? `<!-- Key issues -->
-          <h2 style="margin:0 0 8px;color:#111827;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;">Key Issues (${keyBooks.length})</h2>
-          <table width="100%" cellpadding="6" cellspacing="0" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:20px;font-size:12px;">
-            <tr style="background:#e8e0f0;"><td style="font-weight:600;color:#4b5563;">Title</td><td style="font-weight:600;color:#4b5563;">#</td><td style="font-weight:600;color:#4b5563;">Grade</td><td style="font-weight:600;color:#4b5563;">FMV</td><td style="font-weight:600;color:#4b5563;">Offer</td></tr>
-            ${keyBooks
-              .map(
-                (b, i) =>
-                  `<tr style="${i % 2 ? 'background:#fff;' : ''}"><td>${b.identification.title}</td><td>${b.identification.issue_number}</td><td>${b.condition.grade_low.toFixed(1)}–${b.condition.grade_high.toFixed(1)}</td><td>${fmt(b.valuation.fmv_low)}–${fmt(b.valuation.fmv_high)}</td><td style="font-weight:600;">${fmt(b.adjusted_offer.offer_low)}–${fmt(b.adjusted_offer.offer_high)}</td></tr>`,
-              )
-              .join('')}
-          </table>`
-              : ''
-          }
-
-          ${
-            hiddenGems.length > 0
-              ? `<!-- Hidden gems -->
-          <h2 style="margin:0 0 8px;color:#111827;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;">Hidden Gems (${hiddenGems.length})</h2>
-          <table width="100%" cellpadding="6" cellspacing="0" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;margin-bottom:20px;font-size:12px;">
-            <tr style="background:#dcfce7;"><td style="font-weight:600;color:#4b5563;">Title</td><td style="font-weight:600;color:#4b5563;">FMV</td><td style="font-weight:600;color:#4b5563;">Why</td></tr>
-            ${hiddenGems
-              .map(
-                (b, i) =>
-                  `<tr style="${i % 2 ? 'background:#fff;' : ''}"><td>${b.identification.title} #${b.identification.issue_number}</td><td>${fmt(b.valuation.fmv_low)}–${fmt(b.valuation.fmv_high)}</td><td style="color:#166534;">${b.valuation.hidden_gem_explanation ?? ''}</td></tr>`,
-              )
-              .join('')}
-          </table>`
-              : ''
-          }
-
-          <p style="margin:0;color:#6b7280;font-size:12px;">Full PDF report and CSV inventory are attached.</p>
-        </td></tr>
-
-        <!-- Footer -->
-        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#9ca3af;font-size:11px;">Internal use only · TheComicBuyers.com</p>
-        </td></tr>
-
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:20px;">
+        <tr>
+          <td width="49%" valign="top">${statCard('Adjusted offer', `${fmt(summary.total_offer_low)} – ${fmt(summary.total_offer_high)}`)}</td>
+          <td width="2%"></td>
+          <td width="49%" valign="top">${statCard('Fair market value', `${fmt(summary.total_fmv_low)} – ${fmt(summary.total_fmv_high)}`)}</td>
+        </tr>
       </table>
+
+      ${sectionHead('Collection')}
+      ${kvTable([
+        ['Books identified', `${summary.total_books_identified}${summary.total_books_flagged > 0 ? ` · <span style="color:${c.mutedRed};font-weight:600;">${summary.total_books_flagged} held for review</span>` : ''}`],
+        ['Key issues', String(summary.key_issues_count)],
+        ['Hidden gems', String(hiddenGems.length)],
+        ['Bulk lot', String(summary.bulk_lot_count)],
+        ['By era', eraSummary || '—'],
+        ['Top publishers', topPubs || '—'],
+      ])}
+
+      ${sectionHead('Seller')}
+      ${kvTable([
+        ['Name', esc(seller.name)],
+        ['Email', `<a href="mailto:${esc(seller.email)}" style="color:${c.darkUmber};">${esc(seller.email)}</a>`],
+        ['Phone', esc(seller.phone)],
+        ['Location', `${esc(seller.city)}, ${esc(seller.state)} ${esc(seller.zip)}`],
+        ['Estimated count', `${seller.estimated_count} books`],
+        ['Below minimum', flag(below_minimum, `Yes — ${seller.estimated_count} of ${MIN_COLLECTION_SIZE} (soft gate, operator decides)`)],
+        ['Pickup', seller.pickup_available ? 'Available' : 'Seller delivers'],
+        ['Timeline', esc(seller.timeline)],
+        ...(seller.notes ? ([['Notes', esc(seller.notes)]] as [string, string][]) : []),
+      ])}
+
+      ${sectionHead('Storage and adjustment')}
+      ${kvTable([
+        ['Storage type', esc(seller.storage_type)],
+        ['Storage location', esc(seller.storage_location)],
+        ['FMV multiplier', `×${adjustment.fmv_multiplier.toFixed(3)}`],
+        ['Restoration declared', flag(adjustment.restoration_flag, 'Yes — review required')],
+      ])}
+
+      ${
+        keyBooks.length > 0
+          ? sectionHead(`Key issues (${keyBooks.length})`) +
+            bookTable(
+              keyBooks.map(
+                (b, i) => `<tr style="background:${i % 2 ? c.bisque : c.vellum};">
+                ${cell(`<strong>${esc(b.identification.title)}</strong> #${esc(b.identification.issue_number)}`)}
+                ${cell(`${b.condition.grade_low.toFixed(1)}–${b.condition.grade_high.toFixed(1)}`)}
+                ${cell(`${fmt(b.valuation.fmv_low)}–${fmt(b.valuation.fmv_high)}`, true)}
+                ${cell(`<strong>${fmt(b.adjusted_offer.offer_low)}–${fmt(b.adjusted_offer.offer_high)}</strong>`, true)}
+              </tr>`,
+              ),
+              ['Book', 'Grade', 'FMV', 'Offer'],
+            )
+          : ''
+      }
+
+      ${
+        hiddenGems.length > 0
+          ? sectionHead(`Hidden gems (${hiddenGems.length})`) +
+            bookTable(
+              hiddenGems.map(
+                (b, i) => `<tr style="background:${i % 2 ? c.bisque : c.vellum};">
+                ${cell(`<strong>${esc(b.identification.title)}</strong> #${esc(b.identification.issue_number)}`)}
+                ${cell(`<span style="color:${c.umber};">${esc(b.valuation.hidden_gem_explanation ?? '')}</span>`)}
+                ${cell(`${fmt(b.valuation.fmv_low)}–${fmt(b.valuation.fmv_high)}`, true)}
+                ${cell(`<strong>${fmt(b.adjusted_offer.offer_low)}–${fmt(b.adjusted_offer.offer_high)}</strong>`, true)}
+              </tr>`,
+              ),
+              ['Book', 'Why it matters', 'FMV', 'Offer'],
+            )
+          : ''
+      }
+
+      <p style="${textSm}margin:28px 0 24px;">The full appraisal report (PDF) and the inventory (CSV) are attached.</p>
     </td></tr>
-  </table>
-</body>
-</html>`;
+    ${footer('Internal notification — not for forwarding to the seller.')}`;
+
+  return shell(`New submission ${reference_number}`, 680, inner);
 }
 
 // ---------------------------------------------------------------------------
@@ -330,8 +388,8 @@ export async function sendSellerConfirmation(data: ReportData): Promise<void> {
   const { error } = await resend.emails.send({
     from,
     to: [seller.email],
-    subject: `Your Comic Collection Appraisal — ${reference_number}`,
-    html: sellerConfirmationHtml(data),
+    subject: `Your appraisal report — ${reference_number}`,
+    html: renderSellerConfirmationHtml(data),
   });
 
   if (error) {
@@ -355,8 +413,8 @@ export async function sendInternalNotification(
   const { error } = await resend.emails.send({
     from,
     to: [intake],
-    subject: `${below_minimum ? '[BELOW MINIMUM] ' : ''}New Submission: ${reference_number} — ${seller.name} — ${seller.city}, ${seller.state}`,
-    html: internalNotificationHtml(data),
+    subject: `${below_minimum ? '[BELOW MINIMUM] ' : ''}New submission ${reference_number} — ${seller.name} — ${seller.city}, ${seller.state}`,
+    html: renderInternalNotificationHtml(data),
     attachments: [
       {
         filename: `${reference_number}.pdf`,

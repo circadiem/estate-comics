@@ -1,198 +1,198 @@
-// React PDF document for the appraisal report
-// Rendered server-side via @react-pdf/renderer
-// Pages: cover → summary → hidden gems → key issues → full inventory → terms
-// Source: Implementation Spec §VIII
+// Appraisal report — the Provenance treatment.
+// Rendered server-side via @react-pdf/renderer.
+//
+// "The single most important surface in the product. It is the artifact a
+//  seller forwards to their attorney, their sibling, and their accountant."
+//                                             — docs/04-brand-provenance.md §6
+//
+// Structure (spec §VIII + brand §6):
+//   1. Header + meta band + summary cards + adjustment note + breakdowns
+//   2. Key Issues — the most valuable books, first — followed on the same
+//      pages by Hidden Gems — "Books you might not know are valuable."
+//   3. Complete inventory — FMV descending, vellum/bisque rows; bulk as aggregate
+//   4. How this appraisal was prepared — methodology + terms
+// Footer on every page: Estate Comics · Powered by Legends of Superheros · Est. 1993
+//
+// Cover thumbnails resolve ONLY through resolveCoverImage() (report-images.ts).
 
 import React from 'react';
-import {
-  Document,
-  Page,
-  View,
-  Text,
-  StyleSheet,
-  pdf,
-} from '@react-pdf/renderer';
+import { Document, Page, View, Text, Image, StyleSheet, pdf } from '@react-pdf/renderer';
 import type { ReportData, ReportBook } from '@/lib/types/report';
 import { selectHiddenGems } from '@/lib/services/offer';
+import { resolveCoverImage } from '@/lib/services/report-images';
+import { OFFER_VALIDITY_DAYS } from '@/lib/config/constants';
+import { color, font, size, space, radius, refTracking } from '@/lib/pdf/theme';
 
 // ---------------------------------------------------------------------------
-// Styles
+// Styles — every colour is a token; every size is from the theme scale
 // ---------------------------------------------------------------------------
-
-const C = {
-  navy: '#1a1a2e',
-  red: '#c0392b',
-  gold: '#d4930a',
-  emerald: '#1a6b3c',
-  gray: {
-    50: '#f9fafb',
-    100: '#f3f4f6',
-    200: '#e5e7eb',
-    400: '#9ca3af',
-    600: '#4b5563',
-    800: '#1f2937',
-  },
-  white: '#ffffff',
-};
 
 const s = StyleSheet.create({
+  // NOTE: no lineHeight on the page. react-pdf 4.3 drops any fixed view whose
+  // render-prop text (the page number) inherits or sets a lineHeight, so line
+  // heights live on the prose styles below and the footer stays bare.
   page: {
-    fontFamily: 'Helvetica',
-    fontSize: 8,
-    color: C.gray[800],
-    paddingTop: 48,
-    paddingBottom: 56,
-    paddingHorizontal: 48,
+    fontFamily: font.body,
+    fontSize: size.sm,
+    color: color.charcoalBrown,
+    backgroundColor: color.ivory,
+    paddingTop: space.pageTop,
+    paddingBottom: space.pageBottom,
+    paddingHorizontal: space.pageX,
   },
 
-  // Cover
-  coverPage: { fontFamily: 'Helvetica', paddingTop: 72, paddingHorizontal: 64 },
-  coverBrand: { fontSize: 28, fontFamily: 'Helvetica-Bold', color: C.red, letterSpacing: 2 },
-  coverTagline: { fontSize: 11, color: C.gray[600], marginTop: 4 },
-  coverTitle: { fontSize: 18, fontFamily: 'Helvetica-Bold', color: C.navy, marginTop: 48 },
-  coverRule: { borderBottomWidth: 1.5, borderBottomColor: C.red, marginTop: 16, marginBottom: 24 },
-  coverDetail: { fontSize: 10, color: C.gray[600], marginTop: 6 },
-  coverDetailLabel: { fontFamily: 'Helvetica-Bold', color: C.gray[800] },
-  coverFooter: {
+  // Header (page 1)
+  headerRule: { height: 4, backgroundColor: color.darkUmber, marginBottom: space.block },
+  wordmarkBlock: { alignItems: 'center', marginBottom: space.block },
+  wordmark: {
+    fontFamily: font.display,
+    fontWeight: 700,
+    fontSize: size.wordmark,
+    color: color.charcoalBrown,
+    letterSpacing: -0.2, lineHeight: 1 },
+  wordmarkHair: { width: 112, height: 1, backgroundColor: color.antiqueGold, marginTop: 8, marginBottom: 6 },
+  descriptor: {
+    fontFamily: font.display,
+    fontStyle: 'italic',
+    fontSize: size.descriptor,
+    color: color.patina, lineHeight: 1.45 },
+  titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
+  h1: { fontFamily: font.display, fontWeight: 600, fontSize: size.h1, lineHeight: 1.15, color: color.darkUmber },
+  refNumber: { fontFamily: font.body, fontWeight: 600, fontSize: size.sm, letterSpacing: refTracking, color: color.charcoalBrown, lineHeight: 1.45 },
+  refLabel: { fontSize: size.micro, color: color.umber, textAlign: 'right', lineHeight: 1.45 },
+
+  // Running header (pages 2+)
+  runningHeader: {
     position: 'absolute',
-    bottom: 40,
-    left: 64,
-    right: 64,
-    fontSize: 7,
-    color: C.gray[400],
-    textAlign: 'center',
-    borderTopWidth: 0.5,
-    borderTopColor: C.gray[200],
-    paddingTop: 8,
-  },
-
-  // Section headers
-  sectionHeader: {
-    fontSize: 12,
-    fontFamily: 'Helvetica-Bold',
-    color: C.navy,
-    borderBottomWidth: 1.5,
-    borderBottomColor: C.red,
+    top: 18,
+    left: space.pageX,
+    right: space.pageX,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
     paddingBottom: 4,
-    marginBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: color.antiqueGold,
   },
-  subsectionHeader: {
-    fontSize: 9,
-    fontFamily: 'Helvetica-Bold',
-    color: C.gray[600],
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: 6,
-    marginTop: 14,
-  },
+  runningWordmark: { fontFamily: font.display, fontWeight: 700, fontSize: size.wordmarkSmall, color: color.charcoalBrown, lineHeight: 1.3 },
 
-  // Page footer
-  pageFooter: {
-    position: 'absolute',
-    bottom: 24,
-    left: 48,
-    right: 48,
-    fontSize: 7,
-    color: C.gray[400],
+  // Meta band
+  metaBand: {
+    backgroundColor: color.vellum,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: color.bisque,
+    marginTop: space.gap,
+    marginHorizontal: -space.pageX,
+    paddingHorizontal: space.pageX,
+    paddingVertical: space.tight,
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
+  metaItem: { fontSize: size.label, color: color.umber, lineHeight: 1.45 },
+  metaValue: { color: color.charcoalBrown, fontWeight: 600 },
 
-  // Stat grid (summary page)
-  statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
-  statBox: {
-    borderWidth: 1,
-    borderColor: C.gray[200],
-    borderRadius: 4,
-    padding: 8,
-    minWidth: 110,
+  // Section headings
+  h2: { fontFamily: font.display, fontWeight: 600, fontSize: size.h2, lineHeight: 1.2, color: color.darkUmber },
+  h3: { fontFamily: font.display, fontWeight: 500, fontSize: size.h3, lineHeight: 1.3, color: color.darkUmber },
+  subhead: { fontFamily: font.display, fontStyle: 'italic', fontSize: size.subhead, lineHeight: 1.4, color: color.patina, marginTop: 2 },
+  sectionRule: { height: 1, backgroundColor: color.antiqueGold, marginTop: space.tight, marginBottom: space.gap },
+
+  // Summary cards
+  cards: { flexDirection: 'row', gap: space.tight, marginTop: space.block },
+  card: {
     flex: 1,
-  },
-  statLabel: { fontSize: 7, color: C.gray[400], textTransform: 'uppercase', letterSpacing: 0.5 },
-  statValue: { fontSize: 14, fontFamily: 'Helvetica-Bold', color: C.navy, marginTop: 2 },
-  statSub: { fontSize: 7, color: C.gray[600], marginTop: 1 },
-
-  // Tables
-  tableHeader: {
-    flexDirection: 'row',
-    backgroundColor: C.navy,
-    borderRadius: 2,
-    paddingVertical: 4,
-    paddingHorizontal: 4,
-    marginBottom: 1,
-  },
-  tableHeaderCell: {
-    fontSize: 6.5,
-    fontFamily: 'Helvetica-Bold',
-    color: C.white,
-    textTransform: 'uppercase',
-    letterSpacing: 0.3,
-  },
-  tableRow: {
-    flexDirection: 'row',
-    paddingVertical: 3.5,
-    paddingHorizontal: 4,
-    borderBottomWidth: 0.5,
-    borderBottomColor: C.gray[200],
-  },
-  tableRowAlt: { backgroundColor: C.gray[50] },
-  tableCell: { fontSize: 7, color: C.gray[800] },
-  tableCellBold: { fontSize: 7, fontFamily: 'Helvetica-Bold', color: C.gray[800] },
-
-  // Hidden gem cards
-  gemCard: {
+    backgroundColor: color.ivory,
     borderWidth: 1,
-    borderColor: C.gold,
-    borderRadius: 4,
-    padding: 10,
-    marginBottom: 8,
-    backgroundColor: '#fffbeb',
+    borderColor: color.bisque,
+    borderTopWidth: 2,
+    borderTopColor: color.antiqueGold,
+    borderRadius: radius,
+    paddingVertical: space.gap,
+    paddingHorizontal: space.gap,
   },
-  gemTitle: { fontSize: 9, fontFamily: 'Helvetica-Bold', color: C.navy },
-  gemMeta: { fontSize: 7.5, color: C.gray[600], marginTop: 2 },
-  gemBadge: {
-    backgroundColor: C.gold,
-    borderRadius: 10,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    alignSelf: 'flex-start',
-    marginTop: 4,
-  },
-  gemBadgeText: { fontSize: 6.5, color: C.white, fontFamily: 'Helvetica-Bold' },
-  gemExplanation: { fontSize: 7.5, color: C.gray[600], marginTop: 6, lineHeight: 1.4 },
-  gemValues: { flexDirection: 'row', gap: 16, marginTop: 6 },
-  gemValueLabel: { fontSize: 6.5, color: C.gray[400], textTransform: 'uppercase' },
-  gemValueText: { fontSize: 8.5, fontFamily: 'Helvetica-Bold', color: C.emerald },
+  cardLabel: { fontSize: size.label, color: color.umber, marginBottom: 2, lineHeight: 1.45 },
+  cardFigure: { fontFamily: font.display, fontWeight: 600, fontSize: size.figure, lineHeight: 1.1, color: color.darkUmber },
+  cardFigureSm: { fontFamily: font.display, fontWeight: 600, fontSize: size.h3, lineHeight: 1.15, color: color.darkUmber },
+  cardSub: { fontSize: size.micro, color: color.umber, marginTop: 2, lineHeight: 1.45 },
 
-  // Two-column layout
-  twoCol: { flexDirection: 'row', gap: 12 },
+  // Panels
+  panel: {
+    backgroundColor: color.bisque,
+    borderRadius: radius,
+    padding: space.gap,
+    marginTop: space.gap,
+  },
+  panelTitle: { fontWeight: 600, fontSize: size.sm, color: color.darkUmber, marginBottom: 3, lineHeight: 1.45 },
+  panelText: { fontSize: size.label, color: color.charcoalBrown, lineHeight: 1.5 },
+  flagText: { fontWeight: 600, fontSize: size.label, color: color.mutedRed, lineHeight: 1.45 },
+
+  // Two-column breakdowns
+  twoCol: { flexDirection: 'row', gap: space.block, marginTop: space.block },
   col: { flex: 1 },
+  kvRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3, borderBottomWidth: 0.5, borderBottomColor: color.bisque },
+  kvLabel: { fontSize: size.label, color: color.umber, lineHeight: 1.45 },
+  kvValue: { fontSize: size.label, fontWeight: 600, color: color.darkUmber, lineHeight: 1.45 },
 
-  // Era table
-  eraRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2.5 },
-  eraLabel: { fontSize: 7.5, color: C.gray[600] },
-  eraCount: { fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: C.navy },
+  // Book rows (Key Issues, Hidden Gems)
+  bookRow: {
+    flexDirection: 'row',
+    gap: space.gap,
+    paddingVertical: space.tight,
+    borderBottomWidth: 0.5,
+    borderBottomColor: color.bisque,
+  },
+  bookBody: { flex: 1 },
+  bookTitle: { fontWeight: 700, fontSize: size.sm, color: color.charcoalBrown, lineHeight: 1.45 },
+  bookMeta: { fontSize: size.label, color: color.umber, marginTop: 1, lineHeight: 1.45 },
+  bookSentence: { fontSize: size.label, color: color.charcoalBrown, marginTop: 3, lineHeight: 1.5 },
+  bookFigures: { width: 128, alignItems: 'flex-end' },
+  figLabel: { fontSize: size.micro, color: color.umber, lineHeight: 1.45 },
+  figValue: { fontSize: size.sm, fontWeight: 600, color: color.darkUmber, marginBottom: 3, lineHeight: 1.45 },
 
-  // Adjustment box
-  adjustBox: {
-    borderWidth: 1,
-    borderColor: '#bfdbfe',
-    backgroundColor: '#eff6ff',
-    borderRadius: 4,
-    padding: 8,
-    marginTop: 12,
+  // Cover thumbnail
+  thumb: { width: 30, height: 45, borderRadius: radius, borderWidth: 1, borderColor: color.bisque, backgroundColor: color.vellum },
+  thumbImg: { width: 30, height: 45, borderRadius: radius, objectFit: 'cover' },
+  thumbPlaceholder: { width: 30, height: 45, alignItems: 'center', justifyContent: 'center' },
+  thumbPlaceholderText: { fontSize: 5.5, color: color.patina, textAlign: 'center', lineHeight: 1.45 },
+
+  // Inventory table
+  th: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingBottom: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: color.antiqueGold,
+    marginBottom: 2,
   },
-  adjustTitle: { fontSize: 7, fontFamily: 'Helvetica-Bold', color: '#1e40af', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 },
-  adjustReason: { fontSize: 7, color: '#1d4ed8', marginBottom: 2 },
-  restorationBox: {
-    borderWidth: 1,
-    borderColor: '#fcd34d',
-    backgroundColor: '#fffbeb',
-    borderRadius: 4,
-    padding: 8,
-    marginTop: 8,
+  thText: { fontWeight: 600, fontSize: size.label, color: color.darkUmber, lineHeight: 1.45 },
+  tr: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5, paddingHorizontal: 4, borderRadius: radius },
+  trAlt: { backgroundColor: color.bisque },
+  trBase: { backgroundColor: color.vellum },
+  td: { fontSize: size.label, color: color.charcoalBrown, lineHeight: 1.45 },
+  tdMuted: { fontSize: size.micro, color: color.umber, lineHeight: 1.45 },
+  tdNum: { fontSize: size.label, color: color.charcoalBrown, textAlign: 'right', lineHeight: 1.45 },
+  tdNumStrong: { fontSize: size.label, fontWeight: 600, color: color.darkUmber, textAlign: 'right', lineHeight: 1.45 },
+
+  // Prose
+  p: { fontSize: size.sm, lineHeight: 1.6, color: color.charcoalBrown, marginBottom: space.tight, maxWidth: 440 },
+  termTitle: { fontWeight: 600, fontSize: size.sm, color: color.darkUmber, marginTop: space.tight, marginBottom: 2, lineHeight: 1.45 },
+  termBody: { fontSize: size.label, lineHeight: 1.55, color: color.charcoalBrown, maxWidth: 460 },
+
+  // Footer
+  footer: {
+    position: 'absolute',
+    bottom: 22,
+    left: space.pageX,
+    right: space.pageX,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopWidth: 0.5,
+    borderTopColor: color.bisque,
+    paddingTop: 6,
   },
-  restorationText: { fontSize: 7, color: '#92400e' },
+  footerText: { fontSize: size.micro, color: color.patina },
 });
 
 // ---------------------------------------------------------------------------
@@ -201,381 +201,462 @@ const s = StyleSheet.create({
 
 function fmt(n: number): string {
   if (n < 1) return `$${n.toFixed(2)}`;
-  return `$${Math.round(n).toLocaleString()}`;
+  return `$${Math.round(n).toLocaleString('en-US')}`;
 }
+const range = (lo: number, hi: number) => `${fmt(lo)} – ${fmt(hi)}`;
 
 function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', {
-    year: 'numeric', month: 'long', day: 'numeric',
-  });
+  return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+function offerExpiry(iso: string): string {
+  const d = new Date(iso);
+  d.setDate(d.getDate() + OFFER_VALIDITY_DAYS);
+  return fmtDate(d.toISOString());
+}
+
+const byFmvDesc = (a: ReportBook, b: ReportBook) => b.valuation.fmv_midpoint - a.valuation.fmv_midpoint;
+
+function plainSignificance(book: ReportBook): string | null {
+  const { type, description } = book.identification.significance;
+  if (description) return description;
+  if (!type) return null;
+  const labels: Record<NonNullable<typeof type>, string> = {
+    first_appearance: 'First appearance of a significant character.',
+    first_cameo: 'First brief appearance of a significant character.',
+    origin: 'Origin story issue.',
+    death: 'A major character death — a milestone issue.',
+    first_issue: 'First issue of the series.',
+    key_storyline: 'Part of a defining storyline.',
+    creator_debut: 'A notable creator’s debut on the title.',
+    crossover: 'A crossover issue collectors seek out.',
+  };
+  return labels[type];
 }
 
 // ---------------------------------------------------------------------------
-// Page footer
+// Shared pieces
 // ---------------------------------------------------------------------------
 
-function PageFooter({ refNum }: { refNum: string }) {
+/** The ONLY place a cover thumbnail is drawn. Source comes from the accessor. */
+function CoverThumb({ book }: { book: ReportBook }) {
+  const src = resolveCoverImage(book);
   return (
-    <View style={s.pageFooter} fixed>
-      <Text>{refNum}</Text>
-      <Text>TheComicBuyers.com — Confidential Appraisal Report</Text>
-      <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
+    <View style={s.thumb}>
+      {src ? (
+        // eslint-disable-next-line jsx-a11y/alt-text -- react-pdf Image has no alt prop
+        <Image src={src} style={s.thumbImg} />
+      ) : (
+        <View style={s.thumbPlaceholder}>
+          <Text style={s.thumbPlaceholderText}>No{'\n'}image</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function Footer() {
+  return (
+    <View style={s.footer} fixed>
+      <Text style={s.footerText}>Estate Comics · Powered by Legends of Superheros · Est. 1993</Text>
+      <Text style={s.footerText} render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
+    </View>
+  );
+}
+
+function RunningHeader({ refNum }: { refNum: string }) {
+  return (
+    <View style={s.runningHeader} fixed>
+      <Text style={s.runningWordmark}>EstateComics</Text>
+      <Text style={s.refNumber}>{refNum}</Text>
+    </View>
+  );
+}
+
+function SectionTitle({ title, subhead }: { title: string; subhead?: string }) {
+  return (
+    <View>
+      <Text style={s.h2}>{title}</Text>
+      {subhead && <Text style={s.subhead}>{subhead}</Text>}
+      <View style={s.sectionRule} />
+    </View>
+  );
+}
+
+/** A page after the first: running header + footer, content starts below both. */
+function InnerPage({ data, children }: { data: ReportData; children: React.ReactNode }) {
+  return (
+    <Page size="LETTER" style={[s.page, { paddingTop: space.pageTop + 8 }]}>
+      <RunningHeader refNum={data.reference_number} />
+      <Footer />
+      {children}
+    </Page>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 1. Opening page — header, meta band, summary cards
+// ---------------------------------------------------------------------------
+
+function OpeningPage({ data }: { data: ReportData }) {
+  const { summary, adjustment, seller } = data;
+  const eras = (
+    [
+      ['Golden Age', summary.breakdown_by_era.golden],
+      ['Silver Age', summary.breakdown_by_era.silver],
+      ['Bronze Age', summary.breakdown_by_era.bronze],
+      ['Copper Age', summary.breakdown_by_era.copper],
+      ['Modern Age', summary.breakdown_by_era.modern],
+    ] as const
+  ).filter(([, n]) => n > 0);
+  const publishers = Object.entries(summary.breakdown_by_publisher)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 6);
+
+  return (
+    <Page size="LETTER" style={s.page}>
+      <Footer />
+      <View style={[s.headerRule, { marginHorizontal: -space.pageX, marginTop: -space.pageTop }]} />
+
+      <View style={s.wordmarkBlock}>
+        <Text style={s.wordmark}>EstateComics</Text>
+        <View style={s.wordmarkHair} />
+        <Text style={s.descriptor}>Professional Comic Book Estate Services</Text>
+      </View>
+
+      <View style={s.titleRow}>
+        <View>
+          <Text style={s.h1}>Appraisal Report</Text>
+          <Text style={s.subhead}>Prepared for {seller.name}</Text>
+        </View>
+        <View>
+          <Text style={s.refLabel}>Reference</Text>
+          <Text style={s.refNumber}>{data.reference_number}</Text>
+        </View>
+      </View>
+
+      <View style={s.metaBand}>
+        <Text style={s.metaItem}>Date of appraisal  <Text style={s.metaValue}>{fmtDate(data.generated_at)}</Text></Text>
+        <Text style={s.metaItem}>Books appraised  <Text style={s.metaValue}>{summary.total_books_identified}</Text></Text>
+        <Text style={s.metaItem}>Location  <Text style={s.metaValue}>{seller.city}, {seller.state}</Text></Text>
+      </View>
+
+      <View style={s.cards}>
+        <View style={s.card}>
+          <Text style={s.cardLabel}>Books appraised</Text>
+          <Text style={s.cardFigure}>{summary.total_books_identified}</Text>
+          {summary.total_books_flagged > 0 && (
+            <Text style={s.cardSub}>{summary.total_books_flagged} held for review</Text>
+          )}
+        </View>
+        <View style={s.card}>
+          <Text style={s.cardLabel}>Fair market value</Text>
+          <Text style={s.cardFigureSm}>{fmt(summary.total_fmv_low)}</Text>
+          <Text style={s.cardFigureSm}>to {fmt(summary.total_fmv_high)}</Text>
+        </View>
+        <View style={s.card}>
+          <Text style={s.cardLabel}>Cash offer range</Text>
+          <Text style={s.cardFigureSm}>{fmt(summary.total_offer_low)}</Text>
+          <Text style={s.cardFigureSm}>to {fmt(summary.total_offer_high)}</Text>
+        </View>
+        <View style={s.card}>
+          <Text style={s.cardLabel}>Key issues</Text>
+          <Text style={s.cardFigure}>{summary.key_issues_count}</Text>
+          <Text style={s.cardSub}>
+            {summary.hidden_gems_count} hidden {summary.hidden_gems_count === 1 ? 'gem' : 'gems'}
+          </Text>
+        </View>
+      </View>
+
+      <Text style={[s.p, { marginTop: space.block }]}>
+        This report documents each book we identified from your photographs, our conservative
+        estimate of its condition, its fair market value from recorded sales, and the cash offer
+        we are prepared to make. Offers are stated as ranges, are contingent on physical
+        inspection, and are valid until {offerExpiry(data.generated_at)}.
+      </Text>
+
+      {adjustment.adjustment_reasons.length > 0 && (
+        <View style={s.panel}>
+          <Text style={s.panelTitle}>How your storage answers affected the offer</Text>
+          {adjustment.adjustment_reasons.map((r, i) => (
+            <Text key={i} style={s.panelText}>{r}</Text>
+          ))}
+          <Text style={[s.panelText, { marginTop: 3, color: color.umber }]}>
+            Applied to each book’s value before the offer was calculated (×{adjustment.fmv_multiplier.toFixed(2)}).
+          </Text>
+        </View>
+      )}
+      {adjustment.restoration_flag && (
+        <View style={s.panel}>
+          <Text style={s.flagText}>Restoration disclosed</Text>
+          <Text style={s.panelText}>
+            Because restoration, pressing or cleaning was declared, every book is held for
+            physical review before any offer is final.
+          </Text>
+        </View>
+      )}
+
+      <View style={s.twoCol}>
+        <View style={s.col}>
+          <Text style={s.h3}>By era</Text>
+          {eras.map(([label, n]) => (
+            <View key={label} style={s.kvRow}>
+              <Text style={s.kvLabel}>{label}</Text>
+              <Text style={s.kvValue}>{n}</Text>
+            </View>
+          ))}
+        </View>
+        <View style={s.col}>
+          <Text style={s.h3}>By publisher</Text>
+          {publishers.map(([pub, n]) => (
+            <View key={pub} style={s.kvRow}>
+              <Text style={s.kvLabel}>{pub}</Text>
+              <Text style={s.kvValue}>{n}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    </Page>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 2. Key Issues — same basis as summary.key_issues_count (adjusted tier)
+// ---------------------------------------------------------------------------
+
+function BookEntry({ book, sentence }: { book: ReportBook; sentence: string | null }) {
+  const { identification: id, condition: c, valuation: v, adjusted_offer: o } = book;
+  return (
+    <View style={s.bookRow} wrap={false}>
+      <CoverThumb book={book} />
+      <View style={s.bookBody}>
+        <Text style={s.bookTitle}>
+          {id.title} #{id.issue_number}
+          {id.volume && id.volume > 1 ? ` (Vol. ${id.volume})` : ''}
+        </Text>
+        <Text style={s.bookMeta}>
+          {id.publisher} · {id.cover_date} · {id.era} Age
+          {id.variant_type !== 'direct' && id.variant_type !== 'unknown'
+            ? ` · ${id.variant_type.replace(/_/g, ' ')}`
+            : ''}
+        </Text>
+        {sentence && <Text style={s.bookSentence}>{sentence}</Text>}
+        <Text style={[s.bookMeta, { marginTop: 3 }]}>
+          Grade {c.grade_label_low} – {c.grade_label_high} ({c.grade_low.toFixed(1)}–{c.grade_high.toFixed(1)})
+          {id.flagged_for_review ? '  ·  Held for review' : ''}
+        </Text>
+      </View>
+      <View style={s.bookFigures}>
+        <Text style={s.figLabel}>Fair market value</Text>
+        <Text style={s.figValue}>{range(v.fmv_low, v.fmv_high)}</Text>
+        <Text style={s.figLabel}>Our offer</Text>
+        <Text style={s.figValue}>{range(o.offer_low, o.offer_high)}</Text>
+      </View>
+    </View>
+  );
+}
+
+function KeyIssuesSection({ data }: { data: ReportData }) {
+  const keys = data.books.filter((b) => b.adjusted_offer.tier === 'key_issues').sort(byFmvDesc);
+  if (keys.length === 0) return null;
+  return (
+    <View>
+      <SectionTitle
+        title={`Key issues (${keys.length})`}
+        subhead="The most valuable books in the collection, first."
+      />
+      {keys.map((book, i) => (
+        <BookEntry key={i} book={book} sentence={plainSignificance(book)} />
+      ))}
     </View>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Cover page
+// 3. Hidden Gems — capped selection shared with every other surface
 // ---------------------------------------------------------------------------
 
-function CoverPage({ data }: { data: ReportData }) {
-  // Single source of truth: the summary is built from adjusted_offer server-side,
-  // so the headline here matches the inventory rows, the email, and the screen.
-  const totalAdjLow = data.summary.total_offer_low;
-  const totalAdjHigh = data.summary.total_offer_high;
-
-  return (
-    <Page size="LETTER" style={s.coverPage}>
-      {/* Branding */}
-      <Text style={s.coverBrand}>THECOMICBUYERS.COM</Text>
-      <Text style={s.coverTagline}>AI-Powered Comic Book Collection Acquisition</Text>
-
-      {/* Rule */}
-      <View style={s.coverRule} />
-
-      {/* Title */}
-      <Text style={s.coverTitle}>Appraisal Report</Text>
-
-      {/* Details */}
-      <Text style={s.coverDetail}>
-        <Text style={s.coverDetailLabel}>Reference:  </Text>
-        {data.reference_number}
-      </Text>
-      <Text style={s.coverDetail}>
-        <Text style={s.coverDetailLabel}>Generated:  </Text>
-        {fmtDate(data.generated_at)}
-      </Text>
-      <Text style={[s.coverDetail, { marginTop: 20 }]}>
-        <Text style={s.coverDetailLabel}>Prepared for:  </Text>
-        {data.seller.name}
-      </Text>
-      <Text style={s.coverDetail}>
-        <Text style={s.coverDetailLabel}>Location:  </Text>
-        {data.seller.city}, {data.seller.state} {data.seller.zip}
-      </Text>
-
-      {/* Offer highlight */}
-      <View style={{ marginTop: 40, borderWidth: 1.5, borderColor: C.red, borderRadius: 6, padding: 16, backgroundColor: '#fff5f5' }}>
-        <Text style={{ fontSize: 9, color: C.gray[600], textTransform: 'uppercase', letterSpacing: 0.8 }}>Estimated Cash Offer</Text>
-        <Text style={{ fontSize: 24, fontFamily: 'Helvetica-Bold', color: C.navy, marginTop: 4 }}>
-          {fmt(totalAdjLow)} – {fmt(totalAdjHigh)}
-        </Text>
-        <Text style={{ fontSize: 8, color: C.gray[600], marginTop: 4 }}>
-          Based on {data.books.length} identified book{data.books.length !== 1 ? 's' : ''} · Offer valid {14} days from generation
-        </Text>
-      </View>
-
-      {/* Footer */}
-      <View style={s.coverFooter}>
-        <Text>This report is confidential and intended solely for the named recipient. All valuations are estimates based on available market data and photo assessment. Actual offer subject to physical inspection.</Text>
-      </View>
-    </Page>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Summary page
-// ---------------------------------------------------------------------------
-
-function SummaryPage({ data }: { data: ReportData }) {
-  const { summary, adjustment } = data;
-  const totalAdjLow = summary.total_offer_low;
-  const totalAdjHigh = summary.total_offer_high;
-
-  const eraEntries = [
-    ['Golden Age', summary.breakdown_by_era.golden],
-    ['Silver Age', summary.breakdown_by_era.silver],
-    ['Bronze Age', summary.breakdown_by_era.bronze],
-    ['Copper Age', summary.breakdown_by_era.copper],
-    ['Modern Age', summary.breakdown_by_era.modern],
-  ].filter(([, count]) => (count as number) > 0);
-
-  const topPublishers = Object.entries(summary.breakdown_by_publisher)
-    .sort(([, a], [, b]) => (b as number) - (a as number))
-    .slice(0, 8);
-
-  return (
-    <Page size="LETTER" style={s.page}>
-      <PageFooter refNum={data.reference_number} />
-      <Text style={s.sectionHeader}>Collection Summary</Text>
-
-      {/* Key stats */}
-      <View style={s.statGrid}>
-        <View style={s.statBox}>
-          <Text style={s.statLabel}>Books Identified</Text>
-          <Text style={s.statValue}>{summary.total_books_identified}</Text>
-          {summary.total_books_flagged > 0 && (
-            <Text style={s.statSub}>{summary.total_books_flagged} flagged for review</Text>
-          )}
-        </View>
-        <View style={s.statBox}>
-          <Text style={s.statLabel}>Est. Fair Market Value</Text>
-          <Text style={s.statValue}>{fmt(summary.total_fmv_low)}</Text>
-          <Text style={s.statSub}>– {fmt(summary.total_fmv_high)}</Text>
-        </View>
-        <View style={s.statBox}>
-          <Text style={s.statLabel}>Adjusted Offer</Text>
-          <Text style={[s.statValue, { color: C.emerald }]}>{fmt(totalAdjLow)}</Text>
-          <Text style={s.statSub}>– {fmt(totalAdjHigh)}</Text>
-        </View>
-        <View style={s.statBox}>
-          <Text style={s.statLabel}>Key Issues</Text>
-          <Text style={s.statValue}>{summary.key_issues_count}</Text>
-        </View>
-        <View style={s.statBox}>
-          <Text style={s.statLabel}>Hidden Gems</Text>
-          <Text style={s.statValue}>{summary.hidden_gems_count}</Text>
-        </View>
-      </View>
-
-      {/* Era + publisher breakdowns */}
-      <View style={s.twoCol}>
-        <View style={s.col}>
-          <Text style={s.subsectionHeader}>Era Breakdown</Text>
-          {eraEntries.map(([label, count]) => (
-            <View key={label as string} style={s.eraRow}>
-              <Text style={s.eraLabel}>{label as string}</Text>
-              <Text style={s.eraCount}>{count as number}</Text>
-            </View>
-          ))}
-        </View>
-        <View style={s.col}>
-          <Text style={s.subsectionHeader}>Top Publishers</Text>
-          {topPublishers.map(([pub, count]) => (
-            <View key={pub} style={s.eraRow}>
-              <Text style={s.eraLabel}>{pub}</Text>
-              <Text style={s.eraCount}>{count as number}</Text>
-            </View>
-          ))}
-        </View>
-      </View>
-
-      {/* Storage adjustment */}
-      {adjustment.adjustment_reasons.length > 0 && (
-        <View style={s.adjustBox}>
-          <Text style={s.adjustTitle}>Storage Adjustment Applied ({adjustment.fmv_multiplier.toFixed(2)}×)</Text>
-          {adjustment.adjustment_reasons.map((r, i) => (
-            <Text key={i} style={s.adjustReason}>· {r}</Text>
-          ))}
-        </View>
-      )}
-      {adjustment.restoration_flag && (
-        <View style={s.restorationBox}>
-          <Text style={s.restorationText}>Restoration disclosure noted — all books subject to physical review before offer is finalised.</Text>
-        </View>
-      )}
-    </Page>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Hidden gems page
-// ---------------------------------------------------------------------------
-
-function HiddenGemsPage({ data }: { data: ReportData }) {
+function HiddenGemsSection({ data, first }: { data: ReportData; first: boolean }) {
   const gems = selectHiddenGems(data.books);
   if (gems.length === 0) return null;
-
   return (
-    <Page size="LETTER" style={s.page}>
-      <PageFooter refNum={data.reference_number} />
-      <Text style={s.sectionHeader}>Hidden Gems ({gems.length})</Text>
-      <Text style={{ fontSize: 7.5, color: C.gray[600], marginBottom: 12, lineHeight: 1.4 }}>
-        These books have collector significance that may not be obvious to a non-collector.
-        Each is worth meaningfully more than a typical issue from the same era.
-      </Text>
-
-      {gems.map((book, i) => {
-        const { identification: id, valuation: val, adjusted_offer: offer } = book;
-        return (
-          <View key={i} style={s.gemCard} wrap={false}>
-            <Text style={s.gemTitle}>
-              {id.title} #{id.issue_number}
-              {id.volume ? ` (Vol. ${id.volume})` : ''}
-            </Text>
-            <Text style={s.gemMeta}>
-              {id.publisher} · {id.cover_date} · {id.era} Age
-            </Text>
-            {id.significance.type && (
-              <View style={s.gemBadge}>
-                <Text style={s.gemBadgeText}>{id.significance.type.replace(/_/g, ' ').toUpperCase()}</Text>
-              </View>
-            )}
-            {val.hidden_gem_explanation && (
-              <Text style={s.gemExplanation}>{val.hidden_gem_explanation}</Text>
-            )}
-            <View style={s.gemValues}>
-              <View>
-                <Text style={s.gemValueLabel}>Est. Value</Text>
-                <Text style={s.gemValueText}>{fmt(val.fmv_low)} – {fmt(val.fmv_high)}</Text>
-              </View>
-              <View>
-                <Text style={s.gemValueLabel}>Offer</Text>
-                <Text style={s.gemValueText}>{fmt(offer.offer_low)} – {fmt(offer.offer_high)}</Text>
-              </View>
-              <View>
-                <Text style={s.gemValueLabel}>Grade</Text>
-                <Text style={s.gemValueText}>{book.condition.grade_label_low} – {book.condition.grade_label_high}</Text>
-              </View>
-            </View>
-          </View>
-        );
-      })}
-    </Page>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Key issues page (adjusted FMV midpoint ≥ $500 — same basis as summary.key_issues_count)
-// ---------------------------------------------------------------------------
-
-const KEY_COL_WIDTHS = { title: '24%', issue: '8%', pub: '18%', era: '8%', grade: '12%', fmv: '15%', offer: '15%' };
-
-function KeyIssuesPage({ data }: { data: ReportData }) {
-  const keys = data.books.filter((b) => b.adjusted_offer.tier === 'key_issues');
-  if (keys.length === 0) return null;
-
-  return (
-    <Page size="LETTER" style={s.page}>
-      <PageFooter refNum={data.reference_number} />
-      <Text style={s.sectionHeader}>Key Issues ({keys.length})</Text>
-
-      {/* Table header */}
-      <View style={s.tableHeader}>
-        <Text style={[s.tableHeaderCell, { width: KEY_COL_WIDTHS.title }]}>Title</Text>
-        <Text style={[s.tableHeaderCell, { width: KEY_COL_WIDTHS.issue }]}>#</Text>
-        <Text style={[s.tableHeaderCell, { width: KEY_COL_WIDTHS.pub }]}>Publisher</Text>
-        <Text style={[s.tableHeaderCell, { width: KEY_COL_WIDTHS.era }]}>Era</Text>
-        <Text style={[s.tableHeaderCell, { width: KEY_COL_WIDTHS.grade }]}>Grade</Text>
-        <Text style={[s.tableHeaderCell, { width: KEY_COL_WIDTHS.fmv }]}>FMV</Text>
-        <Text style={[s.tableHeaderCell, { width: KEY_COL_WIDTHS.offer }]}>Offer</Text>
+    <View style={first ? undefined : { marginTop: space.section }}>
+      <SectionTitle
+        title="Books you might not know are valuable."
+        subhead="Collector significance that is easy to miss without a background in comics."
+      />
+      <View style={[s.panel, { marginTop: 0, paddingTop: 2, paddingBottom: 2 }]}>
+        {gems.map((book, i) => (
+          <BookEntry key={i} book={book} sentence={book.valuation.hidden_gem_explanation} />
+        ))}
       </View>
+    </View>
+  );
+}
 
-      {keys.map((book, i) => {
-        const { identification: id, condition: cond, valuation: val, adjusted_offer: offer } = book;
-        return (
-          <View key={i} style={[s.tableRow, i % 2 === 1 ? s.tableRowAlt : {}]} wrap={false}>
-            <Text style={[s.tableCellBold, { width: KEY_COL_WIDTHS.title }]}>{id.title}</Text>
-            <Text style={[s.tableCell, { width: KEY_COL_WIDTHS.issue }]}>{id.issue_number}</Text>
-            <Text style={[s.tableCell, { width: KEY_COL_WIDTHS.pub }]}>{id.publisher}</Text>
-            <Text style={[s.tableCell, { width: KEY_COL_WIDTHS.era }]}>{id.era}</Text>
-            <Text style={[s.tableCell, { width: KEY_COL_WIDTHS.grade }]}>
-              {cond.grade_low.toFixed(1)}–{cond.grade_high.toFixed(1)}
-            </Text>
-            <Text style={[s.tableCell, { width: KEY_COL_WIDTHS.fmv }]}>
-              {fmt(val.fmv_low)}–{fmt(val.fmv_high)}
-            </Text>
-            <Text style={[s.tableCellBold, { width: KEY_COL_WIDTHS.offer, color: C.emerald }]}>
-              {fmt(offer.offer_low)}–{fmt(offer.offer_high)}
-            </Text>
-          </View>
-        );
-      })}
-    </Page>
+/** Key Issues then Hidden Gems, flowing across as many pages as they need. */
+function HighlightsPages({ data }: { data: ReportData }) {
+  const hasKeys = data.books.some((b) => b.adjusted_offer.tier === 'key_issues');
+  const hasGems = selectHiddenGems(data.books).length > 0;
+  if (!hasKeys && !hasGems) return null;
+  return (
+    <InnerPage data={data}>
+      <KeyIssuesSection data={data} />
+      <HiddenGemsSection data={data} first={!hasKeys} />
+    </InnerPage>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Full inventory page(s)
+// 4. Complete inventory — FMV descending; bulk lot as an aggregate line
 // ---------------------------------------------------------------------------
 
-const INV_COL_WIDTHS = { title: '22%', issue: '6%', pub: '14%', era: '7%', grade: '10%', fmv: '12%', offer: '12%', flags: '17%' };
+const COL = { thumb: 34, title: 176, era: 44, grade: 70, fmv: 78, offer: 78, flags: 36 } as const;
 
 function InventoryPage({ data }: { data: ReportData }) {
   const gems = new Set<ReportBook>(selectHiddenGems(data.books));
+  const listed = data.books.filter((b) => !b.adjusted_offer.is_bulk).sort(byFmvDesc);
+  const bulk = data.books.filter((b) => b.adjusted_offer.is_bulk);
+  const bulkFmv = bulk.reduce((a, b) => ({ lo: a.lo + b.valuation.fmv_low, hi: a.hi + b.valuation.fmv_high }), { lo: 0, hi: 0 });
+  const bulkOffer = bulk.reduce((a, b) => ({ lo: a.lo + b.adjusted_offer.offer_low, hi: a.hi + b.adjusted_offer.offer_high }), { lo: 0, hi: 0 });
+
   return (
-    <Page size="LETTER" style={s.page}>
-      <PageFooter refNum={data.reference_number} />
-      <Text style={s.sectionHeader}>Full Inventory ({data.books.length} books)</Text>
+    <InnerPage data={data}>
+      <SectionTitle
+        title={`Complete inventory (${data.books.length} ${data.books.length === 1 ? 'book' : 'books'})`}
+        subhead="Every book we identified, highest value first."
+      />
 
-      {/* Table header — fixed across pages */}
-      <View style={s.tableHeader} fixed>
-        <Text style={[s.tableHeaderCell, { width: INV_COL_WIDTHS.title }]}>Title</Text>
-        <Text style={[s.tableHeaderCell, { width: INV_COL_WIDTHS.issue }]}>#</Text>
-        <Text style={[s.tableHeaderCell, { width: INV_COL_WIDTHS.pub }]}>Publisher</Text>
-        <Text style={[s.tableHeaderCell, { width: INV_COL_WIDTHS.era }]}>Era</Text>
-        <Text style={[s.tableHeaderCell, { width: INV_COL_WIDTHS.grade }]}>Grade</Text>
-        <Text style={[s.tableHeaderCell, { width: INV_COL_WIDTHS.fmv }]}>FMV (est.)</Text>
-        <Text style={[s.tableHeaderCell, { width: INV_COL_WIDTHS.offer }]}>Offer</Text>
-        <Text style={[s.tableHeaderCell, { width: INV_COL_WIDTHS.flags }]}>Flags</Text>
-      </View>
+      {listed.length > 0 && (
+        <View style={s.th} fixed>
+          <View style={{ width: COL.thumb }} />
+          <Text style={[s.thText, { width: COL.title }]}>Title</Text>
+          <Text style={[s.thText, { width: COL.era }]}>Era</Text>
+          <Text style={[s.thText, { width: COL.grade }]}>Grade</Text>
+          <Text style={[s.thText, { width: COL.fmv, textAlign: 'right' }]}>Fair value</Text>
+          <Text style={[s.thText, { width: COL.offer, textAlign: 'right' }]}>Offer</Text>
+          <Text style={[s.thText, { width: COL.flags, textAlign: 'right' }]}>Note</Text>
+        </View>
+      )}
 
-      {data.books.map((book, i) => {
-        const { identification: id, condition: cond, valuation: val, adjusted_offer: offer } = book;
-        const flags = [
-          id.flagged_for_review ? 'Review' : '',
-          gems.has(book) ? 'Gem' : '',
-          offer.tier === 'key_issues' ? 'Key' : '',
-          id.significance.type ? '★' : '',
-        ].filter(Boolean).join(' · ');
-
+      {listed.map((book, i) => {
+        const { identification: id, condition: c, valuation: v, adjusted_offer: o } = book;
+        const note = id.flagged_for_review
+          ? 'Review'
+          : gems.has(book)
+            ? 'Gem'
+            : o.tier === 'key_issues'
+              ? 'Key'
+              : '';
         return (
-          <View key={i} style={[s.tableRow, i % 2 === 1 ? s.tableRowAlt : {}]} wrap={false}>
-            <Text style={[s.tableCellBold, { width: INV_COL_WIDTHS.title }]}>{id.title}</Text>
-            <Text style={[s.tableCell, { width: INV_COL_WIDTHS.issue }]}>{id.issue_number}</Text>
-            <Text style={[s.tableCell, { width: INV_COL_WIDTHS.pub }]}>{id.publisher}</Text>
-            <Text style={[s.tableCell, { width: INV_COL_WIDTHS.era }]}>{id.era.slice(0, 2)}</Text>
-            <Text style={[s.tableCell, { width: INV_COL_WIDTHS.grade }]}>
-              {cond.grade_low.toFixed(1)}–{cond.grade_high.toFixed(1)}
-            </Text>
-            <Text style={[s.tableCell, { width: INV_COL_WIDTHS.fmv }]}>
-              {fmt(val.fmv_low)}–{fmt(val.fmv_high)}
-            </Text>
-            <Text style={[s.tableCellBold, { width: INV_COL_WIDTHS.offer, color: C.emerald }]}>
-              {fmt(offer.offer_low)}–{fmt(offer.offer_high)}
-            </Text>
-            <Text style={[s.tableCell, { width: INV_COL_WIDTHS.flags, color: C.gray[400] }]}>
-              {flags}
+          <View key={i} style={[s.tr, i % 2 === 0 ? s.trBase : s.trAlt]} wrap={false}>
+            <View style={{ width: COL.thumb }}>
+              <CoverThumb book={book} />
+            </View>
+            <View style={{ width: COL.title, paddingRight: 6 }}>
+              <Text style={[s.td, { fontWeight: 600 }]}>{id.title} #{id.issue_number}</Text>
+              <Text style={s.tdMuted}>{id.publisher} · {id.cover_date}</Text>
+            </View>
+            <Text style={[s.td, { width: COL.era }]}>{id.era}</Text>
+            <Text style={[s.td, { width: COL.grade }]}>{c.grade_low.toFixed(1)}–{c.grade_high.toFixed(1)}</Text>
+            <Text style={[s.tdNum, { width: COL.fmv }]}>{fmt(v.fmv_low)}–{fmt(v.fmv_high)}</Text>
+            <Text style={[s.tdNumStrong, { width: COL.offer }]}>{fmt(o.offer_low)}–{fmt(o.offer_high)}</Text>
+            <Text style={[s.tdMuted, { width: COL.flags, textAlign: 'right', color: id.flagged_for_review ? color.mutedRed : color.umber }]}>
+              {note}
             </Text>
           </View>
         );
       })}
-    </Page>
+
+      {bulk.length > 0 && (
+        <View style={[s.panel, { marginTop: space.block }]} wrap={false}>
+          <Text style={s.panelTitle}>Bulk lot</Text>
+          <Text style={s.panelText}>
+            {bulk.length} {bulk.length === 1 ? 'book' : 'books'} valued under $10 each, offered as
+            one lot rather than itemised.
+          </Text>
+          <View style={[s.kvRow, { marginTop: 4 }]}>
+            <Text style={s.kvLabel}>Combined fair market value</Text>
+            <Text style={s.kvValue}>{range(bulkFmv.lo, bulkFmv.hi)}</Text>
+          </View>
+          <View style={[s.kvRow, { borderBottomWidth: 0 }]}>
+            <Text style={s.kvLabel}>Combined offer</Text>
+            <Text style={s.kvValue}>{range(bulkOffer.lo, bulkOffer.hi)}</Text>
+          </View>
+        </View>
+      )}
+    </InnerPage>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Terms page
+// 5. Methodology and terms — plain language
 // ---------------------------------------------------------------------------
 
-function TermsPage({ data }: { data: ReportData }) {
+function MethodologyPage({ data }: { data: ReportData }) {
+  const terms: [string, string][] = [
+    [
+      'Offer validity',
+      `This appraisal and the offer range in it are valid for ${OFFER_VALIDITY_DAYS} days from ${fmtDate(data.generated_at)}, until ${offerExpiry(data.generated_at)}. After that the collection is re-appraised at current market values.`,
+    ],
+    [
+      'Physical inspection',
+      'Every offer is contingent on a physical inspection of the books by an Estate Comics representative. Grades in this report are conservative estimates from cover photographs; they cannot account for interior pages, staples, or restoration that is not visible from the cover.',
+    ],
+    [
+      'If condition differs from the photographs',
+      'If a book’s condition at inspection differs materially from what the photographs showed, the offer for that book is adjusted and we explain the difference before anything proceeds.',
+    ],
+    [
+      'Restoration',
+      'Professional restoration, cleaning or pressing that was not disclosed before inspection changes a book’s value substantially and leads to a revised offer for that book.',
+    ],
+    [
+      'Payment',
+      'Once the formal offer is accepted, the collection is verified at pickup. Payment follows within 48 hours of verification, by your preferred method.',
+    ],
+    [
+      'No obligation',
+      'This report is not a contract. You may decline the offer for any reason, and so may we. Either way, this document is yours to keep and share.',
+    ],
+  ];
+
   return (
-    <Page size="LETTER" style={s.page}>
-      <PageFooter refNum={data.reference_number} />
-      <Text style={s.sectionHeader}>Terms & Conditions</Text>
+    <InnerPage data={data}>
+      <SectionTitle title="How this appraisal was prepared" />
+      <Text style={s.p}>
+        Each cover photograph was examined to identify the title, issue, publisher and printing,
+        and to estimate a condition grade. Grades are stated as a range and lean conservative: we
+        grade to buy, so where a detail was uncertain, the lower estimate was used.
+      </Text>
+      <Text style={s.p}>
+        Fair market value is drawn from recorded sales of the same issue at the same grade where
+        such data exists. Where it does not, a conservative reference table by era and grade is
+        used instead, and the value is an estimate rather than a market figure. Our offer is a
+        percentage of fair market value at the lower end of the grade range, set by the book’s
+        tier; the percentages are the same for every seller.
+      </Text>
+      <Text style={s.p}>
+        Your answers about how the collection was stored adjust the value before the offer is
+        calculated. That adjustment can lower an offer; it never raises one above what the
+        photographs support.
+      </Text>
 
-      {[
-        ['Offer Validity', `This offer estimate is valid for 14 days from the generation date shown on this report (${fmtDate(data.generated_at)}). After this period, the collection must be re-appraised.`],
-        ['Physical Inspection', 'All offer amounts are contingent upon physical inspection of the collection by a TheComicBuyers representative. The AI-generated grades are conservative estimates from cover photographs only and cannot account for interior pages, staple condition, or professional restoration not visible from the cover.'],
-        ['Restoration Disclosure', 'Any professional restoration, cleaning, or pressing not disclosed prior to physical inspection will result in offer renegotiation. Undisclosed restoration detected at inspection may reduce individual book offers by 30–70%.'],
-        ['Grade Variance', 'Condition grades span a minimum range of 1.0 grade point to account for factors not visible in photographs (interior page quality, staple rust, subscription creases, Marvel Value Stamps, hidden defects). The actual grade assigned after inspection will typically fall at or above the midpoint of the AI-estimated range.'],
-        ['Valuation Sources', 'Fair market values are derived from GoCollect sales data where available, or from era/grade interpolation tables where GoCollect data is unavailable. Market conditions fluctuate; valuations reflect estimates at time of report generation.'],
-        ['Payment', 'Upon acceptance of the formal offer, the collection is physically verified at pickup. Payment is made within 48 hours of verification, by the seller\'s preferred method. All offers are contingent on physical inspection and valid for 14 days from the report date.'],
-        ['No Obligation', 'This appraisal report does not constitute a binding contract. Both parties retain the right to decline the transaction for any reason.'],
-      ].map(([title, body], i) => (
-        <View key={i} style={{ marginBottom: 10 }}>
-          <Text style={{ fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: C.navy, marginBottom: 2 }}>{title}</Text>
-          <Text style={{ fontSize: 7, color: C.gray[600], lineHeight: 1.5 }}>{body}</Text>
-        </View>
-      ))}
-
-      <View style={{ marginTop: 16, borderTopWidth: 0.5, borderTopColor: C.gray[200], paddingTop: 10 }}>
-        <Text style={{ fontSize: 7, color: C.gray[400], textAlign: 'center' }}>
-          TheComicBuyers.com · EstateComics.com · questions@thecomicbuyers.com{'\n'}
-          Reference: {data.reference_number}
-        </Text>
+      <View style={{ marginTop: space.gap }}>
+        <Text style={s.h3}>Terms</Text>
+        <View style={s.sectionRule} />
+        {terms.map(([title, body]) => (
+          <View key={title} wrap={false}>
+            <Text style={s.termTitle}>{title}</Text>
+            <Text style={s.termBody}>{body}</Text>
+          </View>
+        ))}
       </View>
-    </Page>
+
+      <Text style={[s.subhead, { marginTop: space.section, textAlign: 'center' }]}>
+        Every collection has a story. We honor it.
+      </Text>
+    </InnerPage>
   );
 }
 
@@ -586,16 +667,16 @@ function TermsPage({ data }: { data: ReportData }) {
 function AppraisalDocument({ data }: { data: ReportData }) {
   return (
     <Document
-      title={`Appraisal Report ${data.reference_number}`}
-      author="TheComicBuyers.com"
-      subject="Comic Book Collection Appraisal"
+      title={`Estate Comics Appraisal Report ${data.reference_number}`}
+      author="Estate Comics"
+      subject="Comic book collection appraisal"
+      creator="Estate Comics"
+      producer="Estate Comics"
     >
-      <CoverPage data={data} />
-      <SummaryPage data={data} />
-      <HiddenGemsPage data={data} />
-      <KeyIssuesPage data={data} />
+      <OpeningPage data={data} />
+      <HighlightsPages data={data} />
       <InventoryPage data={data} />
-      <TermsPage data={data} />
+      <MethodologyPage data={data} />
     </Document>
   );
 }
