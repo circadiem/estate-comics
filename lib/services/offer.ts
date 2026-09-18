@@ -70,18 +70,35 @@ export function calculateBookOffer(
 }
 
 // ---------------------------------------------------------------------------
-// Collection summary (used by Task 9 submission flow)
+// Collection summary (used by /api/submit and /api/generate-report)
 // ---------------------------------------------------------------------------
 
-interface CollectionBook {
+/**
+ * The per-book inputs the summary aggregates over.
+ *
+ * `adjusted_offer` is REQUIRED. Every seller-facing surface (on-screen totals,
+ * PDF rows, email tables, CSV) renders the storage-adjusted offer, so the
+ * summary must be computed from the same numbers or the headline will not
+ * equal the sum of the rows beneath it whenever the multiplier ≠ 1.0.
+ */
+export interface CollectionBook {
   identification: IdentificationResult;
   condition: ConditionResult;
   valuation: ValuationResult;
+  /** Base offer before the questionnaire storage adjustment. Informational only. */
   offer: OfferResult;
+  /** Offer after the storage adjustment — the ONLY offer the summary aggregates. */
+  adjusted_offer: OfferResult;
 }
 
 /**
  * Aggregate per-book results into a CollectionSummary.
+ *
+ * Money and tier figures (`total_offer_*`, `key_issues_count`, `bulk_lot_count`)
+ * derive exclusively from `adjusted_offer`. FMV totals derive from the
+ * unadjusted market valuation, which is what "fair market value" means on the
+ * report; the adjustment applies to the offer, not to the market.
+ *
  * Flagged books (identification.flagged_for_review) are counted but still
  * included in totals — the operator reviews them separately.
  */
@@ -101,15 +118,15 @@ export function buildCollectionSummary(
   let bulk_lot_count = 0;
   let total_books_flagged = 0;
 
-  for (const { identification, valuation, offer } of books) {
+  for (const { identification, valuation, adjusted_offer } of books) {
     total_fmv_low += valuation.fmv_low;
     total_fmv_high += valuation.fmv_high;
-    total_offer_low += offer.offer_low;
-    total_offer_high += offer.offer_high;
+    total_offer_low += adjusted_offer.offer_low;
+    total_offer_high += adjusted_offer.offer_high;
 
-    if (offer.tier === 'key_issues') key_issues_count++;
+    if (adjusted_offer.tier === 'key_issues') key_issues_count++;
     if (valuation.is_hidden_gem) hidden_gems_count++;
-    if (offer.is_bulk) bulk_lot_count++;
+    if (adjusted_offer.is_bulk) bulk_lot_count++;
     if (identification.flagged_for_review) total_books_flagged++;
 
     // Era breakdown

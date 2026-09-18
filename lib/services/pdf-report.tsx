@@ -228,8 +228,10 @@ function PageFooter({ refNum }: { refNum: string }) {
 // ---------------------------------------------------------------------------
 
 function CoverPage({ data }: { data: ReportData }) {
-  const totalAdjLow = data.books.reduce((s, b) => s + b.adjusted_offer.offer_low, 0);
-  const totalAdjHigh = data.books.reduce((s, b) => s + b.adjusted_offer.offer_high, 0);
+  // Single source of truth: the summary is built from adjusted_offer server-side,
+  // so the headline here matches the inventory rows, the email, and the screen.
+  const totalAdjLow = data.summary.total_offer_low;
+  const totalAdjHigh = data.summary.total_offer_high;
 
   return (
     <Page size="LETTER" style={s.coverPage}>
@@ -286,8 +288,8 @@ function CoverPage({ data }: { data: ReportData }) {
 
 function SummaryPage({ data }: { data: ReportData }) {
   const { summary, adjustment } = data;
-  const totalAdjLow = data.books.reduce((sum, b) => sum + b.adjusted_offer.offer_low, 0);
-  const totalAdjHigh = data.books.reduce((sum, b) => sum + b.adjusted_offer.offer_high, 0);
+  const totalAdjLow = summary.total_offer_low;
+  const totalAdjHigh = summary.total_offer_high;
 
   const eraEntries = [
     ['Golden Age', summary.breakdown_by_era.golden],
@@ -433,13 +435,13 @@ function HiddenGemsPage({ data }: { data: ReportData }) {
 }
 
 // ---------------------------------------------------------------------------
-// Key issues page (FMV midpoint ≥ $500)
+// Key issues page (adjusted FMV midpoint ≥ $500 — same basis as summary.key_issues_count)
 // ---------------------------------------------------------------------------
 
 const KEY_COL_WIDTHS = { title: '24%', issue: '8%', pub: '18%', era: '8%', grade: '12%', fmv: '15%', offer: '15%' };
 
 function KeyIssuesPage({ data }: { data: ReportData }) {
-  const keys = data.books.filter((b) => b.offer.tier === 'key_issues');
+  const keys = data.books.filter((b) => b.adjusted_offer.tier === 'key_issues');
   if (keys.length === 0) return null;
 
   return (
