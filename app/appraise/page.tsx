@@ -7,14 +7,18 @@
 // Submission: /api/submit mints the ONE reference number for the session and
 // returns the PDF + CSV under it. The report is issued with the submission,
 // never before it, so a session can never carry two numbers (WO-02).
+// Resilience (WO-06): books run through a concurrency pool of
+// PIPELINE_CONCURRENCY; errored books are individually retryable; after each
+// book settles the session is saved to localStorage (results only, never the
+// images) and offered for resume on the next visit.
 // Money math: the browser sends only identification, condition and valuation
 // per book. Offers, the adjustment and the summary are recomputed server-side
 // and the confirmation renders from the server response (WO-05). Any offer
 // arithmetic in this file is a DISPLAY PREVIEW ONLY.
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import UploadComponent from '@/components/upload';
-import ResultsFeed from '@/components/results';
+import ResultsFeed, { isSettled } from '@/components/results';
 import Questionnaire from '@/components/questionnaire';
 import AppraisalReport from '@/components/report';
 import type { ProcessedImage } from '@/lib/types/upload';
@@ -32,8 +36,20 @@ import {
   applyAdjustmentToOffer,
 } from '@/lib/services/grade-adjustment';
 import type { GradeAdjustment } from '@/lib/services/grade-adjustment';
-import { OFFER_VALIDITY_DAYS } from '@/lib/config/constants';
+import { OFFER_VALIDITY_DAYS, PIPELINE_CONCURRENCY } from '@/lib/config/constants';
 import { validateAndProcessImage } from '@/lib/utils/image-validation';
+import { asyncPool } from '@/lib/utils/async-pool';
+import {
+  ResumablePhaseSchema,
+  clearSavedSession,
+  countIdentified,
+  fromSavedSession,
+  loadSavedSession,
+  shrinkThumbnail,
+  storeSavedSession,
+  toSavedSession,
+  type SavedSession,
+} from '@/lib/utils/appraisal-session';
 
 // ---------------------------------------------------------------------------
 // API call helper
@@ -96,7 +112,9 @@ function AdjustedOfferSummary({
     (sum, c) => sum + (c.adjusted_offer?.offer_high ?? 0),
     0,
   );
-  const errored = comics.filter((c) => c.status === 'error').length;
+  const errored = comics.filter(
+    (c) => c.status === 'error' || c.status === 'image_needed',
+  ).length;
 
   return (
     <div className="space-y-4">
@@ -175,6 +193,27 @@ function AdjustedOfferSummary({
 }
 
 // ---------------------------------------------------------------------------
+// Unprocessed-books banner (WO-06)
+// ---------------------------------------------------------------------------
+
+function UnprocessedBanner({ comics }: { comics: ComicProcessingState[] }) {
+  const n = comics.filter((c) => c.status === 'error' || c.status === 'image_needed').length;
+  if (n === 0) return null;
+  return (
+    <div
+      role="status"
+      className="mb-4 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200"
+    >
+      <span className="font-semibold">
+        {n} {n === 1 ? 'book' : 'books'} couldn&apos;t be processed
+      </span>{' '}
+      — retry {n === 1 ? 'it' : 'them'} below, or continue without. Only processed books
+      are included in your appraisal.
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Submission response shape (mirrors /api/submit)
 // ---------------------------------------------------------------------------
 
@@ -225,6 +264,12 @@ export default function AppraisePage() {
   /** Latest adjustment, readable from inside the stable processOne callback so a
    *  book re-run after the questionnaire (photo retake) still gets adjusted_offer. */
   const adjustmentRef = useRef<GradeAdjustment | null>(null);
+  /** A saved session found on mount, offered for resume until acted on. */
+  const [resumable, setResumable] = useState<SavedSession | null>(null);
+  /** Shrunk thumbnails by comic id, for the saved session. */
+  const thumbsRef = useRef<Map<string, string>>(new Map());
+  /** Monotonic counter so a slow persist never overwrites a newer one. */
+  const persistSeq = useRef(0);
   /** The server's response to /api/submit — the single source of the
    *  reference number and the report rendered on the confirmation screen. */
   const [submission, setSubmission] = useState<SubmissionResult | null>(null);
@@ -371,9 +416,95 @@ export default function AppraisePage() {
     }));
     setComics(initial);
     setPhase('processing');
-    Promise.all(readyImages.map((img) => processOne(img))).then(() => {
+    // Never more than PIPELINE_CONCURRENCY books in flight (WO-06).
+    asyncPool(readyImages, PIPELINE_CONCURRENCY, processOne).then(() => {
       setPhase('done');
     });
+  }
+
+  /** Re-run one errored book. Needs its image, which lives in upload state;
+   *  after a refresh it is gone and the slot asks for the photo again. */
+  function handleRetry(id: string) {
+    const img = readyImages.find((i) => i.id === id);
+    const comic = comics.find((c) => c.id === id);
+    if (!comic) return;
+    if (!img) {
+      updateComic(id, {
+        status: 'image_needed',
+        error: comic.error ?? 'Photo no longer available',
+      });
+      return;
+    }
+    setComics((prev) =>
+      prev.map((c) =>
+        c.id === id
+          ? { id, originalName: c.originalName, thumbnailDataUrl: c.thumbnailDataUrl, status: 'pending' }
+          : c,
+      ),
+    );
+    void processOne(img);
+  }
+
+  // ── Session persistence (WO-06) ──────────────────────────────────────────
+  // Save after any book settles, in any resumable phase. Thumbnails are shrunk
+  // once per book and cached; the write is skipped if a newer save started.
+  useEffect(() => {
+    const phaseParse = ResumablePhaseSchema.safeParse(phase);
+    if (!phaseParse.success) return;
+    if (comics.length === 0 || !comics.some(isSettled)) return;
+
+    const seq = ++persistSeq.current;
+    const snapshotPhase = phaseParse.data;
+    const snapshotComics = comics;
+    const snapshotQuestionnaire = questionnaire;
+
+    (async () => {
+      for (const c of snapshotComics) {
+        if (!thumbsRef.current.has(c.id) && c.thumbnailDataUrl) {
+          const small = await shrinkThumbnail(c.thumbnailDataUrl);
+          thumbsRef.current.set(c.id, small);
+        }
+      }
+      if (seq !== persistSeq.current) return; // superseded
+      storeSavedSession(
+        toSavedSession(snapshotPhase, snapshotComics, snapshotQuestionnaire, thumbsRef.current),
+      );
+    })();
+  }, [phase, comics, questionnaire]);
+
+  // Offer to resume a saved session, once, on first mount.
+  useEffect(() => {
+    const saved = loadSavedSession();
+    if (saved) setResumable(saved);
+  }, []);
+
+  function handleResume() {
+    if (!resumable) return;
+    const restored = fromSavedSession(resumable);
+    let adj: GradeAdjustment | null = null;
+    if (restored.questionnaire) {
+      adj = computeGradeAdjustment(restored.questionnaire); // DISPLAY PREVIEW ONLY
+      adjustmentRef.current = adj;
+      setQuestionnaire(restored.questionnaire);
+      setAdjustment(adj);
+    }
+    for (const c of restored.comics) {
+      if (c.thumbnailDataUrl) thumbsRef.current.set(c.id, c.thumbnailDataUrl);
+    }
+    setComics(
+      restored.comics.map((c) =>
+        adj && c.status === 'complete' && c.valuation
+          ? { ...c, adjusted_offer: applyAdjustmentToOffer(c.valuation, adj) }
+          : c,
+      ),
+    );
+    setPhase(restored.phase);
+    setResumable(null);
+  }
+
+  function handleDiscardSaved() {
+    clearSavedSession();
+    setResumable(null);
   }
 
   function handleQuestionnaireSubmit(data: SellerQuestionnaire) {
@@ -393,6 +524,9 @@ export default function AppraisePage() {
   }
 
   function handleStartOver() {
+    clearSavedSession();
+    thumbsRef.current = new Map();
+    persistSeq.current++;
     setPhase('upload');
     setReadyImages([]);
     setComics([]);
@@ -415,6 +549,8 @@ export default function AppraisePage() {
         seller: questionnaire,
         books,
       });
+      persistSeq.current++; // cancel any in-flight save
+      clearSavedSession();
       setSubmission(result);
       setPhase('submitted');
       setSubmitState('idle');
@@ -462,6 +598,36 @@ export default function AppraisePage() {
       {/* UPLOAD */}
       {phase === 'upload' && (
         <>
+          {resumable && (
+            <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-5 py-4">
+              <div>
+                <p className="text-sm font-semibold text-blue-900">
+                  Resume your appraisal ({countIdentified(resumable)}{' '}
+                  {countIdentified(resumable) === 1 ? 'book' : 'books'} identified)
+                </p>
+                <p className="mt-0.5 text-xs text-blue-700">
+                  Saved {new Date(resumable.saved_at).toLocaleString()}. Books photographed
+                  but not yet processed will ask for their photo again.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleResume}
+                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+                >
+                  Resume
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDiscardSaved}
+                  className="rounded-md bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                >
+                  Start fresh
+                </button>
+              </div>
+            </div>
+          )}
           <UploadComponent onImagesReady={setReadyImages} />
           {readyImages.length > 0 && (
             <div className="mt-8 flex items-center justify-between rounded-lg bg-gray-50 px-6 py-4 ring-1 ring-gray-200">
@@ -484,9 +650,13 @@ export default function AppraisePage() {
       {/* PROCESSING */}
       {phase === 'processing' && (
         <>
-          <h2 className="mb-6 text-lg font-semibold text-gray-900">
+          <h2 className="mb-1 text-lg font-semibold text-gray-900">
             Processing your collection…
           </h2>
+          <p className="mb-5 text-sm text-gray-500">
+            Processing {Math.min(comics.filter(isSettled).length + 1, comics.length)} of{' '}
+            {comics.length} · up to {PIPELINE_CONCURRENCY} at a time
+          </p>
           <ResultsFeed comics={comics} />
         </>
       )}
@@ -504,7 +674,8 @@ export default function AppraisePage() {
               ← Start over
             </button>
           </div>
-          <ResultsFeed comics={comics} onRetake={handleRetake} />
+          <UnprocessedBanner comics={comics} />
+          <ResultsFeed comics={comics} onRetake={handleRetake} onRetry={handleRetry} />
           <div className="mt-8 rounded-lg bg-blue-50 px-6 py-5 ring-1 ring-blue-200 text-center">
             <p className="text-sm font-medium text-blue-900">
               Ready for your personalised cash offer?
@@ -569,7 +740,13 @@ export default function AppraisePage() {
             </div>
             <div className="md:col-span-3">
               <p className="mb-3 text-sm font-medium text-gray-700">Per-book breakdown</p>
-              <ResultsFeed comics={comics} useAdjusted onRetake={handleRetake} />
+              <UnprocessedBanner comics={comics} />
+              <ResultsFeed
+                comics={comics}
+                useAdjusted
+                onRetake={handleRetake}
+                onRetry={handleRetry}
+              />
             </div>
           </div>
 

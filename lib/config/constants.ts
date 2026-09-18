@@ -36,6 +36,11 @@ export const JPEG_QUALITY = 85;
 export const MIN_IMAGE_WIDTH = 640;
 export const MIN_IMAGE_HEIGHT = 480;
 
+// Pipeline concurrency — max in-flight books during processing (WO-06).
+// Each book is up to 4 sequential API calls; 4 books in flight keeps a
+// 200-book estate from rate-limit-storming the model API.
+export const PIPELINE_CONCURRENCY = 4;
+
 // Rate limiting — max requests per IP per hour (unauthenticated)
 export const RATE_LIMIT_RPH = 50;
 

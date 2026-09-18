@@ -1,7 +1,11 @@
-// Shared types for the comic processing pipeline (Tasks 5–7)
+// Shared types for the comic processing pipeline
 // Each uploaded image flows through:
 //   pending → identifying → grading → valuating → complete | error
-// After questionnaire submission, adjusted_offer is populated.
+// After questionnaire submission, adjusted_offer is populated (display preview).
+//
+// `image_needed` (WO-06): a book restored from a saved session whose image is
+// gone (the page was refreshed mid-run, or the book had errored and cannot be
+// retried without its photo). The seller re-adds the photo for that slot.
 
 import type { IdentificationResult } from '@/lib/schemas/identification';
 import type { ConditionResult } from '@/lib/schemas/condition';
@@ -14,7 +18,8 @@ export type ProcessingStatus =
   | 'grading'
   | 'valuating'
   | 'complete'
-  | 'error';
+  | 'error'
+  | 'image_needed';
 
 export interface ComicProcessingState {
   /** Matches ProcessedImage.id from the upload step */

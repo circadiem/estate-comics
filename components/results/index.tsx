@@ -149,6 +149,40 @@ function Spinner() {
   );
 }
 
+/** Opens the camera / file picker for ONE slot and hands the file to the parent. */
+function PhotoInputButton({
+  comicId,
+  label,
+  onPick,
+  className,
+}: {
+  comicId: string;
+  label: string;
+  onPick: (id: string, file: File) => void;
+  className: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="sr-only"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) onPick(comicId, file);
+          e.target.value = '';
+        }}
+      />
+      <button type="button" onClick={() => inputRef.current?.click()} className={className}>
+        {label}
+      </button>
+    </>
+  );
+}
+
 /** Retake affordance for a book whose photo came back `photo_quality: 'poor'`.
  *  Opens the camera (or file picker) for THIS slot only; the parent replaces
  *  the image and re-runs the pipeline for just this book. */
@@ -159,7 +193,6 @@ function RetakeControl({
   comic: ComicProcessingState;
   onRetake?: (id: string, file: File) => void;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div className="mt-1 rounded-md bg-amber-50 px-2.5 py-2 ring-1 ring-amber-200">
       <p className="text-xs font-medium text-amber-900">
@@ -171,25 +204,12 @@ function RetakeControl({
       </p>
       {onRetake && (
         <>
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="sr-only"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) onRetake(comic.id, file);
-              e.target.value = '';
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
+          <PhotoInputButton
+            comicId={comic.id}
+            label="Retake photo"
+            onPick={onRetake}
             className="mt-1.5 rounded-md bg-white px-2.5 py-1 text-xs font-semibold text-amber-900 shadow-sm ring-1 ring-inset ring-amber-300 hover:bg-amber-100"
-          >
-            Retake photo
-          </button>
+          />
           {comic.error && <p className="mt-1 text-xs text-red-700">{comic.error}</p>}
         </>
       )}
@@ -265,7 +285,13 @@ function ProcessingCard({ comic }: { comic: ComicProcessingState }) {
   );
 }
 
-function ErrorCard({ comic }: { comic: ComicProcessingState }) {
+function ErrorCard({
+  comic,
+  onRetry,
+}: {
+  comic: ComicProcessingState;
+  onRetry?: (id: string) => void;
+}) {
   return (
     <li className="flex gap-3 rounded-lg border border-red-200 bg-red-50 p-3">
       <Thumbnail
@@ -276,6 +302,53 @@ function ErrorCard({ comic }: { comic: ComicProcessingState }) {
       <div className="flex flex-1 flex-col justify-center gap-1 min-w-0">
         <p className="text-sm font-medium text-red-900 truncate">{comic.originalName}</p>
         <p className="text-xs text-red-700">{comic.error ?? 'Processing failed'}</p>
+        {onRetry && (
+          <div>
+            <button
+              type="button"
+              onClick={() => onRetry(comic.id)}
+              className="mt-1 rounded-md bg-white px-2.5 py-1 text-xs font-semibold text-red-800 shadow-sm ring-1 ring-inset ring-red-300 hover:bg-red-100"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/** A book restored from a saved session whose photo is gone (WO-06). */
+function ImageNeededCard({
+  comic,
+  onRetake,
+}: {
+  comic: ComicProcessingState;
+  onRetake?: (id: string, file: File) => void;
+}) {
+  return (
+    <li className="flex gap-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3">
+      <Thumbnail
+        src={comic.thumbnailDataUrl}
+        alt={comic.originalName}
+        className="h-24 w-16 flex-shrink-0 opacity-50"
+      />
+      <div className="flex flex-1 flex-col justify-center gap-1 min-w-0">
+        <p className="text-sm font-medium text-gray-800 truncate">{comic.originalName}</p>
+        <p className="text-xs text-gray-600">
+          Image needed — re-add the photo for this book to include it.
+        </p>
+        {comic.error && <p className="text-xs text-gray-500">Previously: {comic.error}</p>}
+        {onRetake && (
+          <div>
+            <PhotoInputButton
+              comicId={comic.id}
+              label="Add photo"
+              onPick={onRetake}
+              className="mt-1 rounded-md bg-white px-2.5 py-1 text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-100"
+            />
+          </div>
+        )}
       </div>
     </li>
   );
@@ -375,18 +448,21 @@ function CompleteCard({
 // Progress bar
 // ---------------------------------------------------------------------------
 
+/** A book that is no longer in flight, whatever its outcome. */
+export function isSettled(c: ComicProcessingState): boolean {
+  return c.status === 'complete' || c.status === 'error' || c.status === 'image_needed';
+}
+
 function ProgressBar({ comics }: { comics: ComicProcessingState[] }) {
   const total = comics.length;
-  const done = comics.filter(
-    (c) => c.status === 'complete' || c.status === 'error',
-  ).length;
+  const done = comics.filter(isSettled).length;
   const pct = total === 0 ? 0 : Math.round((done / total) * 100);
 
   return (
-    <div className="mb-4">
+    <div className="mb-4" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>
       <div className="mb-1 flex justify-between text-xs text-gray-500">
         <span>
-          {done} of {total} processed
+          Processing {Math.min(done + 1, total)} of {total} · {done} complete
         </span>
         <span>{pct}%</span>
       </div>
@@ -408,21 +484,22 @@ export interface ResultsFeedProps {
   comics: ComicProcessingState[];
   /** When true, complete cards show adjusted_offer instead of base offer */
   useAdjusted?: boolean;
-  /** Per-book retake: replace this slot's image and re-run the pipeline for it.
-   *  When omitted, poor-photo books are flagged but offer no retake button. */
+  /** Per-book retake / re-add: replace this slot's image and re-run the pipeline
+   *  for it. When omitted, poor-photo and image-needed books show no button. */
   onRetake?: (id: string, file: File) => void;
+  /** Per-book retry for errored books whose image is still in memory. */
+  onRetry?: (id: string) => void;
 }
 
 export default function ResultsFeed({
   comics,
   useAdjusted = false,
   onRetake,
+  onRetry,
 }: ResultsFeedProps) {
   if (comics.length === 0) return null;
 
-  const allDone = comics.every(
-    (c) => c.status === 'complete' || c.status === 'error',
-  );
+  const allDone = comics.every(isSettled);
 
   return (
     <div>
@@ -440,7 +517,10 @@ export default function ResultsFeed({
               return <ProcessingCard key={comic.id} comic={comic} />;
 
             case 'error':
-              return <ErrorCard key={comic.id} comic={comic} />;
+              return <ErrorCard key={comic.id} comic={comic} onRetry={onRetry} />;
+
+            case 'image_needed':
+              return <ImageNeededCard key={comic.id} comic={comic} onRetake={onRetake} />;
 
             case 'complete': {
               const displayOffer = useAdjusted
