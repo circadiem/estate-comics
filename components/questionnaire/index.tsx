@@ -15,6 +15,7 @@ import {
 } from '@/lib/schemas/questionnaire';
 import type { SellerQuestionnaire } from '@/lib/schemas/questionnaire';
 import { SERVICE_STATES } from '@/lib/config/constants';
+import { isBelowMinimum, BELOW_MINIMUM_NOTICE } from '@/lib/utils/collection-size';
 
 // ---------------------------------------------------------------------------
 // State labels for the dropdown
@@ -242,6 +243,12 @@ function Step1({
   errors: FieldErrors;
   onChange: (patch: Partial<Draft>) => void;
 }) {
+  const parsedCount = parseInt(draft.estimated_count, 10);
+  // Soft gate: notice only. Submission is never blocked on collection size —
+  // the operator sees `below_minimum` on the internal notification and decides.
+  const showMinimumNotice =
+    !errors.estimated_count && !isNaN(parsedCount) && parsedCount >= 1 && isBelowMinimum(parsedCount);
+
   return (
     <div className="space-y-6">
       <div>
@@ -260,6 +267,14 @@ function Step1({
           ].join(' ')}
         />
         <FieldError message={errors.estimated_count} />
+        {showMinimumNotice && (
+          <p
+            role="status"
+            className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800 ring-1 ring-amber-200"
+          >
+            {BELOW_MINIMUM_NOTICE}
+          </p>
+        )}
       </div>
 
       <RadioGroup

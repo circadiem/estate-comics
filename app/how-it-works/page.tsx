@@ -4,7 +4,7 @@ import Link from 'next/link';
 export const metadata: Metadata = {
   title: 'How It Works | TheComicBuyers.com',
   description:
-    'Learn how TheComicBuyers.com uses AI to identify, grade, and value your comic book collection — and how to get a same-day cash offer with free pickup.',
+    'Learn how TheComicBuyers.com uses AI to identify, grade, and value your comic book collection — and how to get a documented cash offer with free pickup.',
 };
 
 const STEPS = [
@@ -60,7 +60,7 @@ const STEPS = [
       'Review your offer and complete the short seller questionnaire.',
       'Submit your formal offer — a confirmation email is sent immediately.',
       'Our team reviews the submission within 1–2 business days and contacts you to schedule pickup.',
-      'Payment is made same-day, at collection — in cash or your preferred method.',
+      'We verify the books at collection, then pay within 48 hours by your preferred method.',
     ],
     note: 'Offers are valid for 14 days from the submission date.',
   },

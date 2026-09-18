@@ -18,7 +18,7 @@ const VALUES = [
   },
   {
     title: 'We Come to You',
-    body: 'No hauling heavy long boxes to a shop. We travel to you anywhere in our 10-state service area, schedule at your convenience, and pay on the spot.',
+    body: 'No hauling heavy long boxes to a shop. We travel to you anywhere in our 10-state service area, schedule at your convenience, and pay within 48 hours of verifying the books.',
   },
   {
     title: '30+ Years of Expertise',
@@ -63,8 +63,8 @@ export default function AboutPage() {
               There are no surprises.
             </p>
             <p>
-              We still make the drive. We still pay in cash, same-day. But now every seller knows
-              exactly what they have before we arrive.
+              We still make the drive. We still verify every book in person and pay within 48
+              hours. But now every seller knows exactly what they have before we arrive.
             </p>
           </div>
         </div>

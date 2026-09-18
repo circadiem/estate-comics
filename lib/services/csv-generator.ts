@@ -3,9 +3,12 @@
 // Source: Implementation Spec §VIII
 
 import Papa from 'papaparse';
-import type { ReportData } from '@/lib/types/report';
+import type { ReportData, ReportBook } from '@/lib/types/report';
+import { selectHiddenGems } from '@/lib/services/offer';
 
 export function generateCSV(data: ReportData): string {
+  // Same capped selection as the PDF and emails (MAX_HIDDEN_GEMS)
+  const gems = new Set<ReportBook>(selectHiddenGems(data.books));
   const rows = data.books.map((book) => ({
     'Reference #': data.reference_number,
     'Generated At': data.generated_at,
@@ -50,7 +53,7 @@ export function generateCSV(data: ReportData): string {
     'Sales Volume (90d)': book.valuation.sales_volume_90d ?? '',
     'Trend': book.valuation.trend ?? '',
     'Census Count': book.valuation.census_count ?? '',
-    'Is Hidden Gem': book.valuation.is_hidden_gem ? 'Yes' : 'No',
+    'Is Hidden Gem': gems.has(book) ? 'Yes' : 'No',
 
     // Offer (base)
     'Offer Tier': book.offer.tier_label,

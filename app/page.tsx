@@ -12,7 +12,7 @@ const TRUST_ITEMS = [
   { label: 'Est. 1993', sub: '30+ years in comics' },
   { label: 'AI-Powered', sub: 'Instant identification' },
   { label: '10 States', sub: 'New England · NY · NJ · PA · FL' },
-  { label: 'Same-Day Cash', sub: 'Paid on pickup' },
+  { label: 'Paid in 48 Hours', sub: 'After verification at pickup' },
 ];
 
 const HOW_IT_WORKS = [
@@ -57,7 +57,7 @@ const FAQ: { q: string; a: string }[] = [
   },
   {
     q: 'How quickly will I be paid?',
-    a: 'Payment is made same-day, at pickup. We bring cash or can arrange a bank transfer.',
+    a: 'We verify the collection in person at pickup, then pay within 48 hours by your preferred method. Every offer is contingent on that inspection and valid for 14 days.',
   },
   {
     q: 'What states do you serve?',
@@ -86,7 +86,7 @@ export default function HomePage() {
         </h1>
         <p className="mx-auto mt-6 max-w-xl text-lg text-gray-400">
           Upload photos, get instant AI-powered valuations, and receive a fair cash offer — with
-          same-day pickup anywhere in New England, the Mid-Atlantic, or South Florida.
+          free pickup anywhere in New England, the Mid-Atlantic, or South Florida.
         </p>
         <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
           <Link

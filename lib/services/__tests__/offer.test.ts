@@ -9,7 +9,12 @@
 // the renderers use.
 
 import { describe, it, expect } from 'vitest';
-import { buildCollectionSummary, calculateBookOffer } from '@/lib/services/offer';
+import {
+  buildCollectionSummary,
+  calculateBookOffer,
+  selectHiddenGems,
+} from '@/lib/services/offer';
+import { MAX_HIDDEN_GEMS } from '@/lib/config/constants';
 import type { CollectionBook } from '@/lib/services/offer';
 import {
   computeGradeAdjustment,
@@ -222,5 +227,47 @@ describe('buildCollectionSummary — neutral multiplier', () => {
     expect(s.total_offer_low).toBe(sum(books, (b) => b.offer.offer_low));
     expect(s.total_offer_low).toBe(sum(books, (b) => b.adjusted_offer.offer_low));
     expect(s.key_issues_count).toBe(2);
+  });
+});
+
+describe('selectHiddenGems — MAX_HIDDEN_GEMS cap (WO-03)', () => {
+  // 14 gems with distinct midpoints, deliberately out of order, plus 2 non-gems
+  const gemValues = [120, 60, 300, 75, 90, 450, 55, 210, 180, 65, 95, 130, 80, 70];
+  const books: CollectionBook[] = [
+    ...gemValues.map((mid, i) =>
+      book(mid - 10, mid + 10, questionnaireBase, { issue_number: `gem-${i}` }, true),
+    ),
+    book(20, 40, questionnaireBase, { issue_number: 'plain-1' }),
+    book(1000, 1400, questionnaireBase, { issue_number: 'plain-2' }),
+  ];
+
+  it('returns at most MAX_HIDDEN_GEMS books, highest fmv_midpoint first', () => {
+    const gems = selectHiddenGems(books);
+    expect(MAX_HIDDEN_GEMS).toBe(10);
+    expect(gems).toHaveLength(MAX_HIDDEN_GEMS);
+    const mids = gems.map((g) => g.valuation.fmv_midpoint);
+    expect(mids).toEqual([...gemValues].sort((a, b) => b - a).slice(0, MAX_HIDDEN_GEMS));
+    expect(gems.every((g) => g.valuation.is_hidden_gem)).toBe(true);
+  });
+
+  it('never includes a non-gem, even a high-value one', () => {
+    const gems = selectHiddenGems(books);
+    expect(gems.some((g) => g.identification.issue_number.startsWith('plain'))).toBe(false);
+  });
+
+  it('summary.hidden_gems_count uses the capped selection', () => {
+    const s = buildCollectionSummary(books, 'EC-20260918-CAFE');
+    expect(s.hidden_gems_count).toBe(MAX_HIDDEN_GEMS);
+    expect(books.filter((b) => b.valuation.is_hidden_gem).length).toBeGreaterThan(MAX_HIDDEN_GEMS);
+  });
+
+  it('returns every gem when under the cap and preserves input order on ties', () => {
+    const tied = [
+      book(40, 60, questionnaireBase, { issue_number: 'a' }, true),
+      book(40, 60, questionnaireBase, { issue_number: 'b' }, true),
+      book(40, 60, questionnaireBase, { issue_number: 'c' }, true),
+    ];
+    expect(selectHiddenGems(tied).map((b) => b.identification.issue_number)).toEqual(['a', 'b', 'c']);
+    expect(selectHiddenGems([])).toEqual([]);
   });
 });

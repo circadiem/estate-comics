@@ -3,6 +3,7 @@
 // Task 5/6 — Real-time identification, grading, and valuation results feed
 // Cards update in-place as each image moves through the pipeline.
 
+import { useRef } from 'react';
 import type { ComicProcessingState } from '@/lib/types/pipeline';
 import type { IdentificationResult } from '@/lib/schemas/identification';
 import type { ConditionResult } from '@/lib/schemas/condition';
@@ -148,6 +149,54 @@ function Spinner() {
   );
 }
 
+/** Retake affordance for a book whose photo came back `photo_quality: 'poor'`.
+ *  Opens the camera (or file picker) for THIS slot only; the parent replaces
+ *  the image and re-runs the pipeline for just this book. */
+function RetakeControl({
+  comic,
+  onRetake,
+}: {
+  comic: ComicProcessingState;
+  onRetake?: (id: string, file: File) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <div className="mt-1 rounded-md bg-amber-50 px-2.5 py-2 ring-1 ring-amber-200">
+      <p className="text-xs font-medium text-amber-900">
+        Photo quality low — consider retaking
+      </p>
+      <p className="mt-0.5 text-xs text-amber-800">
+        This book has been flagged for review. A clearer, well-lit photo of the front cover
+        gives a more accurate identification and grade.
+      </p>
+      {onRetake && (
+        <>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="sr-only"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) onRetake(comic.id, file);
+              e.target.value = '';
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            className="mt-1.5 rounded-md bg-white px-2.5 py-1 text-xs font-semibold text-amber-900 shadow-sm ring-1 ring-inset ring-amber-300 hover:bg-amber-100"
+          >
+            Retake photo
+          </button>
+          {comic.error && <p className="mt-1 text-xs text-red-700">{comic.error}</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
 function Thumbnail({ src, alt, className }: { src: string; alt: string; className?: string }) {
   if (!src) return <div className={`rounded bg-gray-100 ${className}`} />;
   return (
@@ -238,14 +287,17 @@ function CompleteCard({
   condition,
   valuation,
   offer,
+  onRetake,
 }: {
   comic: ComicProcessingState;
   identification: IdentificationResult;
   condition: ConditionResult;
   valuation: ValuationResult;
   offer: OfferResult;
+  onRetake?: (id: string, file: File) => void;
 }) {
   const sigType = identification.significance.type;
+  const poorPhoto = identification.photo_quality === 'poor';
 
   return (
     <li className="flex gap-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
@@ -311,6 +363,9 @@ function CompleteCard({
             {valuation.hidden_gem_explanation}
           </p>
         )}
+
+        {/* Poor photo → visible flag + per-book retake */}
+        {poorPhoto && <RetakeControl comic={comic} onRetake={onRetake} />}
       </div>
     </li>
   );
@@ -353,9 +408,16 @@ export interface ResultsFeedProps {
   comics: ComicProcessingState[];
   /** When true, complete cards show adjusted_offer instead of base offer */
   useAdjusted?: boolean;
+  /** Per-book retake: replace this slot's image and re-run the pipeline for it.
+   *  When omitted, poor-photo books are flagged but offer no retake button. */
+  onRetake?: (id: string, file: File) => void;
 }
 
-export default function ResultsFeed({ comics, useAdjusted = false }: ResultsFeedProps) {
+export default function ResultsFeed({
+  comics,
+  useAdjusted = false,
+  onRetake,
+}: ResultsFeedProps) {
   if (comics.length === 0) return null;
 
   const allDone = comics.every(
@@ -398,6 +460,7 @@ export default function ResultsFeed({ comics, useAdjusted = false }: ResultsFeed
                     condition={comic.condition}
                     valuation={comic.valuation}
                     offer={displayOffer}
+                    onRetake={onRetake}
                   />
                 );
               }

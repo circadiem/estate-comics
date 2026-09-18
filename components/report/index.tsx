@@ -3,6 +3,7 @@
 // Source: Implementation Spec §VIII
 
 import type { ReportData } from '@/lib/types/report';
+import { selectHiddenGems } from '@/lib/services/offer';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -68,7 +69,8 @@ interface AppraisalReportProps {
 export default function AppraisalReport({ data }: AppraisalReportProps) {
   const { reference_number, generated_at, seller, adjustment, summary, books } = data;
 
-  const hiddenGems = books.filter((b) => b.valuation.is_hidden_gem);
+  // Capped at MAX_HIDDEN_GEMS, same selection the PDF, emails and CSV use
+  const hiddenGems = selectHiddenGems(books);
   const keyIssues = books.filter((b) => b.adjusted_offer.tier === 'key_issues');
 
   // Top publishers by count

@@ -16,7 +16,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!area) return { title: 'Area | TheComicBuyers.com' };
   return {
     title: `Sell Comics in ${area.name} | TheComicBuyers.com`,
-    description: `Get a free AI-powered appraisal for your comic book collection in ${area.name}. We buy Golden, Silver, Bronze, Copper, and Modern Age comics — cash offer, same-day pickup. Serving ${area.cities.slice(0, 3).join(', ')}, and more.`,
+    description: `Get a free AI-powered appraisal for your comic book collection in ${area.name}. We buy Golden, Silver, Bronze, Copper, and Modern Age comics — cash offer, free pickup. Serving ${area.cities.slice(0, 3).join(', ')}, and more.`,
   };
 }
 
@@ -71,7 +71,8 @@ export default function StatePage({ params }: Props) {
           </p>
           <p className="text-sm leading-relaxed text-gray-600">
             Once you submit, our team reviews within 1–2 business days and contacts you to schedule
-            pickup. We pay cash, same-day, when we collect.
+            pickup. We verify the books when we collect them and pay within 48 hours by your
+            preferred method.
           </p>
         </div>
       </section>

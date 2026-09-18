@@ -8,7 +8,7 @@
 // returns the PDF + CSV under it. The report is issued with the submission,
 // never before it, so a session can never carry two numbers (WO-02).
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import UploadComponent from '@/components/upload';
 import ResultsFeed from '@/components/results';
 import Questionnaire from '@/components/questionnaire';
@@ -28,6 +28,7 @@ import {
 } from '@/lib/services/grade-adjustment';
 import type { GradeAdjustment } from '@/lib/services/grade-adjustment';
 import { OFFER_VALIDITY_DAYS } from '@/lib/config/constants';
+import { validateAndProcessImage } from '@/lib/utils/image-validation';
 
 // ---------------------------------------------------------------------------
 // API call helper
@@ -214,6 +215,9 @@ export default function AppraisePage() {
   const [questionnaire, setQuestionnaire] = useState<SellerQuestionnaire | null>(null);
   const [adjustment, setAdjustment] = useState<GradeAdjustment | null>(null);
   const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'error'>('idle');
+  /** Latest adjustment, readable from inside the stable processOne callback so a
+   *  book re-run after the questionnaire (photo retake) still gets adjusted_offer. */
+  const adjustmentRef = useRef<GradeAdjustment | null>(null);
   /** The server's response to /api/submit — the single source of the
    *  reference number and the report rendered on the confirmation screen. */
   const [submission, setSubmission] = useState<SubmissionResult | null>(null);
@@ -242,6 +246,12 @@ export default function AppraisePage() {
           error: err instanceof Error ? err.message : 'Identification failed',
         });
         return;
+      }
+
+      // Poor photo → conservative: force the review flag regardless of what the
+      // model returned. The card shows a retake affordance for this slot.
+      if (identification.photo_quality === 'poor' && !identification.flagged_for_review) {
+        identification = { ...identification, flagged_for_review: true };
       }
 
       updateComic(img.id, { status: 'grading', identification });
@@ -290,9 +300,57 @@ export default function AppraisePage() {
         return;
       }
 
-      updateComic(img.id, { status: 'complete', valuation, offer });
+      const adj = adjustmentRef.current;
+      updateComic(img.id, {
+        status: 'complete',
+        valuation,
+        offer,
+        adjusted_offer: adj ? applyAdjustmentToOffer(valuation, adj) : undefined,
+      });
     },
     [updateComic],
+  );
+
+  /**
+   * Per-book retake (WO-03): validate the new photo, swap it into this slot,
+   * and re-run the pipeline for this book only. Other books are untouched.
+   */
+  const handleRetake = useCallback(
+    async (id: string, file: File) => {
+      const result = await validateAndProcessImage(file, file.type);
+      if (!result.valid) {
+        updateComic(id, { error: result.reason });
+        return;
+      }
+      const thumbnailDataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve((e.target?.result as string) ?? '');
+        reader.onerror = () => resolve('');
+        reader.readAsDataURL(file);
+      });
+      const replacement: ProcessedImage = {
+        id,
+        originalName: file.name,
+        thumbnailDataUrl,
+        processedBase64: result.processedBase64,
+        mimeType: result.mimeType,
+      };
+      setReadyImages((prev) => prev.map((img) => (img.id === id ? replacement : img)));
+      setComics((prev) =>
+        prev.map((c) =>
+          c.id === id
+            ? {
+                id,
+                originalName: file.name,
+                thumbnailDataUrl,
+                status: 'pending',
+              }
+            : c,
+        ),
+      );
+      await processOne(replacement);
+    },
+    [processOne, updateComic],
   );
 
   function handleStartAppraisal() {
@@ -312,6 +370,7 @@ export default function AppraisePage() {
 
   function handleQuestionnaireSubmit(data: SellerQuestionnaire) {
     const adj = computeGradeAdjustment(data);
+    adjustmentRef.current = adj;
     setQuestionnaire(data);
     setAdjustment(adj);
     setComics((prev) =>
@@ -329,6 +388,7 @@ export default function AppraisePage() {
     setComics([]);
     setQuestionnaire(null);
     setAdjustment(null);
+    adjustmentRef.current = null;
     setSubmitState('idle');
     setSubmission(null);
   }
@@ -432,7 +492,7 @@ export default function AppraisePage() {
               ← Start over
             </button>
           </div>
-          <ResultsFeed comics={comics} />
+          <ResultsFeed comics={comics} onRetake={handleRetake} />
           <div className="mt-8 rounded-lg bg-blue-50 px-6 py-5 ring-1 ring-blue-200 text-center">
             <p className="text-sm font-medium text-blue-900">
               Ready for your personalised cash offer?
@@ -496,7 +556,7 @@ export default function AppraisePage() {
             </div>
             <div className="md:col-span-3">
               <p className="mb-3 text-sm font-medium text-gray-700">Per-book breakdown</p>
-              <ResultsFeed comics={comics} useAdjusted />
+              <ResultsFeed comics={comics} useAdjusted onRetake={handleRetake} />
             </div>
           </div>
 
@@ -574,7 +634,10 @@ export default function AppraisePage() {
                 {[
                   ['Review', 'Our team reviews your appraisal within 1–2 business days.'],
                   ['Schedule', 'We contact you to arrange a convenient pickup time.'],
-                  ['Payment', 'We pay same-day when we collect the books.'],
+                  [
+                  'Verification & payment',
+                  'We verify the books when we collect them, then pay within 48 hours by your preferred method.',
+                ],
                 ].map(([title, body], i) => (
                   <li key={i} className="flex gap-3">
                     <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">

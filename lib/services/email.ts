@@ -5,22 +5,33 @@
 
 import { Resend } from 'resend';
 import type { ReportData } from '@/lib/types/report';
-import { OFFER_VALIDITY_DAYS } from '@/lib/config/constants';
+import { MIN_COLLECTION_SIZE, OFFER_VALIDITY_DAYS } from '@/lib/config/constants';
+import { isBelowMinimum } from '@/lib/utils/collection-size';
+import { selectHiddenGems } from '@/lib/services/offer';
 
 // ---------------------------------------------------------------------------
 // Client (lazy — only instantiated on first use so missing key = runtime err)
 // ---------------------------------------------------------------------------
 
-function getResend(): Resend {
-  const key = process.env.RESEND_API_KEY;
-  if (!key) throw new Error('RESEND_API_KEY environment variable is not set');
-  return new Resend(key);
+function requireEnv(name: 'RESEND_API_KEY' | 'FROM_EMAIL' | 'INTAKE_EMAIL'): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} environment variable is not set`);
+  return value;
 }
 
-const FROM_EMAIL =
-  process.env.FROM_EMAIL ?? 'TheComicBuyers <noreply@thecomicbuyers.com>';
-const INTERNAL_EMAIL =
-  process.env.INTERNAL_EMAIL ?? 'offers@thecomicbuyers.com';
+function getResend(): Resend {
+  return new Resend(requireEnv('RESEND_API_KEY'));
+}
+
+/**
+ * Sender and intake addresses. Env-only — there is deliberately no fallback
+ * address. A misconfigured deployment must fail loudly at first send, exactly
+ * as it does for a missing Resend key, rather than route leads to a retired
+ * mailbox.
+ */
+function getEmailConfig(): { from: string; intake: string } {
+  return { from: requireEnv('FROM_EMAIL'), intake: requireEnv('INTAKE_EMAIL') };
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -50,7 +61,7 @@ function offerExpiry(submittedAt: string): string {
 
 function sellerConfirmationHtml(data: ReportData): string {
   const { reference_number, generated_at, seller, summary } = data;
-  const hiddenGems = data.books.filter((b) => b.valuation.is_hidden_gem).length;
+  const hiddenGems = summary.hidden_gems_count;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -119,7 +130,7 @@ function sellerConfirmationHtml(data: ReportData): string {
             ${[
               ['1', 'Our team reviews your appraisal', "We'll verify the AI identification and valuation within 1\u20132 business days."],
               ['2', 'We contact you to schedule', 'A team member will call or email to arrange a convenient pickup time.'],
-              ['3', 'Same-day payment on collection', 'We pay in cash (or your preferred method) when we pick up the books.'],
+              ['3', 'Verification and payment', 'We verify the books in person when we collect them, then pay within 48 hours by your preferred method. Offers are contingent on that inspection and valid for 14 days.'],
             ]
               .map(
                 ([num, title, body]) => `
@@ -173,8 +184,9 @@ function sellerConfirmationHtml(data: ReportData): string {
 
 function internalNotificationHtml(data: ReportData): string {
   const { reference_number, generated_at, seller, adjustment, summary } = data;
+  const below_minimum = isBelowMinimum(seller.estimated_count);
   const keyBooks = data.books.filter((b) => b.adjusted_offer.tier === 'key_issues');
-  const hiddenGems = data.books.filter((b) => b.valuation.is_hidden_gem);
+  const hiddenGems = selectHiddenGems(data.books);
 
   const eraSummary = Object.entries(summary.breakdown_by_era)
     .filter(([, count]) => count > 0)
@@ -239,9 +251,10 @@ function internalNotificationHtml(data: ReportData): string {
             <tr><td style="color:#6b7280;">Phone</td><td style="color:#111827;">${seller.phone}</td></tr>
             <tr style="background:#fff;"><td style="color:#6b7280;">Location</td><td style="color:#111827;">${seller.city}, ${seller.state} ${seller.zip}</td></tr>
             <tr><td style="color:#6b7280;">Est. count</td><td style="color:#111827;">${seller.estimated_count} books</td></tr>
-            <tr style="background:#fff;"><td style="color:#6b7280;">Pickup</td><td style="color:#111827;">${seller.pickup_available ? 'Available' : 'Drop-off only'}</td></tr>
-            <tr><td style="color:#6b7280;">Timeline</td><td style="color:#111827;">${seller.timeline}</td></tr>
-            ${seller.notes ? `<tr style="background:#fff;"><td style="color:#6b7280;">Notes</td><td style="color:#111827;">${seller.notes}</td></tr>` : ''}
+            <tr style="background:#fff;"><td style="color:#6b7280;">Below minimum</td><td style="color:${below_minimum ? '#dc2626' : '#16a34a'};font-weight:600;">${below_minimum ? `YES — ${seller.estimated_count} of ${MIN_COLLECTION_SIZE} (soft gate, operator decides)` : 'No'}</td></tr>
+            <tr><td style="color:#6b7280;">Pickup</td><td style="color:#111827;">${seller.pickup_available ? 'Available' : 'Seller delivers'}</td></tr>
+            <tr style="background:#fff;"><td style="color:#6b7280;">Timeline</td><td style="color:#111827;">${seller.timeline}</td></tr>
+            ${seller.notes ? `<tr><td style="color:#6b7280;">Notes</td><td style="color:#111827;">${seller.notes}</td></tr>` : ''}
           </table>
 
           <!-- Storage & adjustment -->
@@ -311,10 +324,11 @@ function internalNotificationHtml(data: ReportData): string {
  */
 export async function sendSellerConfirmation(data: ReportData): Promise<void> {
   const resend = getResend();
+  const { from } = getEmailConfig();
   const { seller, reference_number } = data;
 
   const { error } = await resend.emails.send({
-    from: FROM_EMAIL,
+    from,
     to: [seller.email],
     subject: `Your Comic Collection Appraisal — ${reference_number}`,
     html: sellerConfirmationHtml(data),
@@ -334,12 +348,14 @@ export async function sendInternalNotification(
   csv: string,
 ): Promise<void> {
   const resend = getResend();
+  const { from, intake } = getEmailConfig();
   const { seller, reference_number } = data;
+  const below_minimum = isBelowMinimum(seller.estimated_count);
 
   const { error } = await resend.emails.send({
-    from: FROM_EMAIL,
-    to: [INTERNAL_EMAIL],
-    subject: `New Submission: ${reference_number} — ${seller.name} — ${seller.city}, ${seller.state}`,
+    from,
+    to: [intake],
+    subject: `${below_minimum ? '[BELOW MINIMUM] ' : ''}New Submission: ${reference_number} — ${seller.name} — ${seller.city}, ${seller.state}`,
     html: internalNotificationHtml(data),
     attachments: [
       {

@@ -4,6 +4,7 @@
 // Source: Implementation Spec §VII.A–C
 
 import { OFFER_TIERS } from '@/lib/config/offer-tiers';
+import { MAX_HIDDEN_GEMS } from '@/lib/config/constants';
 import { OfferResultSchema, CollectionSummarySchema } from '@/lib/schemas/offer';
 import type { OfferResult, CollectionSummary } from '@/lib/schemas/offer';
 import type { IdentificationResult } from '@/lib/schemas/identification';
@@ -70,6 +71,31 @@ export function calculateBookOffer(
 }
 
 // ---------------------------------------------------------------------------
+// Hidden gems — collection-level cap
+// ---------------------------------------------------------------------------
+
+/**
+ * Hidden-gem detection is per-book (lib/services/gocollect.ts) and has no view
+ * of the collection, so the MAX_HIDDEN_GEMS cap is enforced here, at
+ * summary/report time. Returns at most MAX_HIDDEN_GEMS gems ranked by
+ * fmv_midpoint (highest first; ties keep input order). Every renderer — PDF,
+ * emails, on-screen report, CSV — and `hidden_gems_count` must use this
+ * selection so the same books are called gems everywhere. Books beyond the
+ * cap are ordinary books.
+ */
+export function selectHiddenGems<T extends { valuation: ValuationResult }>(books: T[]): T[] {
+  return books
+    .map((book, index) => ({ book, index }))
+    .filter(({ book }) => book.valuation.is_hidden_gem)
+    .sort(
+      (a, b) =>
+        b.book.valuation.fmv_midpoint - a.book.valuation.fmv_midpoint || a.index - b.index,
+    )
+    .slice(0, MAX_HIDDEN_GEMS)
+    .map(({ book }) => book);
+}
+
+// ---------------------------------------------------------------------------
 // Collection summary (used by /api/submit and /api/generate-report)
 // ---------------------------------------------------------------------------
 
@@ -114,7 +140,7 @@ export function buildCollectionSummary(
   let total_offer_low = 0;
   let total_offer_high = 0;
   let key_issues_count = 0;
-  let hidden_gems_count = 0;
+  const hidden_gems_count = selectHiddenGems(books).length;
   let bulk_lot_count = 0;
   let total_books_flagged = 0;
 
@@ -125,7 +151,6 @@ export function buildCollectionSummary(
     total_offer_high += adjusted_offer.offer_high;
 
     if (adjusted_offer.tier === 'key_issues') key_issues_count++;
-    if (valuation.is_hidden_gem) hidden_gems_count++;
     if (adjusted_offer.is_bulk) bulk_lot_count++;
     if (identification.flagged_for_review) total_books_flagged++;
 

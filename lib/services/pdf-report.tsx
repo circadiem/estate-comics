@@ -13,6 +13,7 @@ import {
   pdf,
 } from '@react-pdf/renderer';
 import type { ReportData, ReportBook } from '@/lib/types/report';
+import { selectHiddenGems } from '@/lib/services/offer';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -382,7 +383,7 @@ function SummaryPage({ data }: { data: ReportData }) {
 // ---------------------------------------------------------------------------
 
 function HiddenGemsPage({ data }: { data: ReportData }) {
-  const gems = data.books.filter((b) => b.valuation.is_hidden_gem);
+  const gems = selectHiddenGems(data.books);
   if (gems.length === 0) return null;
 
   return (
@@ -491,6 +492,7 @@ function KeyIssuesPage({ data }: { data: ReportData }) {
 const INV_COL_WIDTHS = { title: '22%', issue: '6%', pub: '14%', era: '7%', grade: '10%', fmv: '12%', offer: '12%', flags: '17%' };
 
 function InventoryPage({ data }: { data: ReportData }) {
+  const gems = new Set<ReportBook>(selectHiddenGems(data.books));
   return (
     <Page size="LETTER" style={s.page}>
       <PageFooter refNum={data.reference_number} />
@@ -512,7 +514,7 @@ function InventoryPage({ data }: { data: ReportData }) {
         const { identification: id, condition: cond, valuation: val, adjusted_offer: offer } = book;
         const flags = [
           id.flagged_for_review ? 'Review' : '',
-          val.is_hidden_gem ? 'Gem' : '',
+          gems.has(book) ? 'Gem' : '',
           offer.tier === 'key_issues' ? 'Key' : '',
           id.significance.type ? '★' : '',
         ].filter(Boolean).join(' · ');
@@ -558,7 +560,7 @@ function TermsPage({ data }: { data: ReportData }) {
         ['Restoration Disclosure', 'Any professional restoration, cleaning, or pressing not disclosed prior to physical inspection will result in offer renegotiation. Undisclosed restoration detected at inspection may reduce individual book offers by 30–70%.'],
         ['Grade Variance', 'Condition grades span a minimum range of 1.0 grade point to account for factors not visible in photographs (interior page quality, staple rust, subscription creases, Marvel Value Stamps, hidden defects). The actual grade assigned after inspection will typically fall at or above the midpoint of the AI-estimated range.'],
         ['Valuation Sources', 'Fair market values are derived from GoCollect sales data where available, or from era/grade interpolation tables where GoCollect data is unavailable. Market conditions fluctuate; valuations reflect estimates at time of report generation.'],
-        ['Payment', 'Upon acceptance of the formal offer following physical inspection, payment is made by check, ACH transfer, or other agreed method within 3 business days. Cryptocurrency payment options available upon request.'],
+        ['Payment', 'Upon acceptance of the formal offer, the collection is physically verified at pickup. Payment is made within 48 hours of verification, by the seller\'s preferred method. All offers are contingent on physical inspection and valid for 14 days from the report date.'],
         ['No Obligation', 'This appraisal report does not constitute a binding contract. Both parties retain the right to decline the transaction for any reason.'],
       ].map(([title, body], i) => (
         <View key={i} style={{ marginBottom: 10 }}>
