@@ -50,14 +50,14 @@ export default function AboutPage() {
               out or downsize.
             </p>
             <p>
-              The process never changed much for 30 years: a seller would call, we'd drive out, spend
+              The process never changed much for 30 years: a seller would call, we&apos;d drive out, spend
               a few hours manually assessing the collection, and make an offer. It worked — but it
-              was slow, opaque, and inconsistent. A collection we'd seen at 9 PM after a long day
+              was slow, opaque, and inconsistent. A collection we&apos;d seen at 9 PM after a long day
               got a different assessment than the same collection at 10 AM on a Tuesday.
             </p>
             <p>
               In 2024, we rebuilt the entire process around AI. We trained our identification system
-              on hundreds of thousands of comics and integrated GoCollect's real-time market data
+              on hundreds of thousands of comics and integrated GoCollect&apos;s real-time market data
               into every valuation. The result: sellers get an instant, objective appraisal based on
               actual sales data — before we even make the drive. We see the same report you see.
               There are no surprises.
