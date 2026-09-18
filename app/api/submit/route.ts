@@ -1,10 +1,18 @@
 // Final submission endpoint — the CANONICAL reference-number minting point.
 //
-// Accepts the full appraisal payload, mints exactly one reference number,
-// builds the collection summary, generates the PDF + CSV under that number,
-// sends the seller confirmation and internal notification, and returns the
-// reference number together with the report so the browser can offer the
-// download. No other route mints reference numbers (WO-02).
+// Order of operations (WO-04):
+//   1. validate the body (Zod)
+//   2. persist submission + books ATOMICALLY — this is the durable write and
+//      the point where the reference number is minted (re-minted on collision)
+//   3. only after the write: render PDF + CSV under that number
+//   4. send both emails, non-fatally, and record which ones went out
+//   5. return 200 with the reference number and the report
+//
+// A database failure returns 500 with a retry message. A seller never again
+// receives a reference number for a lead that does not exist.
+//
+// Known limitation (closed by WO-05): per-book valuation/offer figures are
+// still client-echoed and stored as validated, not yet recomputed here.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -13,11 +21,17 @@ import { IdentificationResultSchema } from '@/lib/schemas/identification';
 import { ConditionResultSchema } from '@/lib/schemas/condition';
 import { ValuationResultSchema } from '@/lib/schemas/valuation';
 import { OfferResultSchema } from '@/lib/schemas/offer';
-import { generateReferenceNumber } from '@/lib/utils/reference-number';
 import { buildCollectionSummary } from '@/lib/services/offer';
 import { generatePDF } from '@/lib/services/pdf-generator';
 import { generateCSV } from '@/lib/services/csv-generator';
 import { sendSellerConfirmation, sendInternalNotification } from '@/lib/services/email';
+import { getSupabase } from '@/lib/services/supabase';
+import {
+  asSubmissionStore,
+  createSubmission,
+  recordEmailOutcomes,
+} from '@/lib/services/submissions';
+import { isBelowMinimum } from '@/lib/utils/collection-size';
 import type { ReportData } from '@/lib/types/report';
 
 const GradeAdjustmentSchema = z.object({
@@ -40,6 +54,9 @@ const RequestBodySchema = z.object({
   books: z.array(ReportBookSchema).min(1),
 });
 
+const RETRY_MESSAGE =
+  'We could not save your submission. Please try again in a moment, or email us and we will take it from there.';
+
 export async function POST(request: NextRequest) {
   let body: unknown;
   try {
@@ -57,12 +74,31 @@ export async function POST(request: NextRequest) {
   }
 
   const { seller, adjustment, books } = parsed.data;
+  const below_minimum = isBelowMinimum(seller.estimated_count);
 
-  // Minted once. This exact value flows into the summary, the PDF, the CSV,
-  // both emails, and the response the confirmation screen renders from.
-  const reference_number = generateReferenceNumber();
+  // ── 1. Durable write. Mints the reference number; nothing else does. ──────
+  let store;
+  try {
+    store = asSubmissionStore(getSupabase());
+  } catch (err) {
+    console.error('Supabase client unavailable:', err);
+    return NextResponse.json({ error: RETRY_MESSAGE }, { status: 500 });
+  }
+
+  let persisted;
+  try {
+    persisted = await createSubmission(
+      store,
+      { seller, adjustment, books, below_minimum },
+      (reference_number) => buildCollectionSummary(books, reference_number),
+    );
+  } catch (err) {
+    console.error('Submission persistence failed:', err);
+    return NextResponse.json({ error: RETRY_MESSAGE }, { status: 500 });
+  }
+
+  const { id, reference_number, summary } = persisted;
   const submitted_at = new Date().toISOString();
-  const summary = buildCollectionSummary(books, reference_number);
 
   const reportData: ReportData = {
     reference_number,
@@ -73,7 +109,8 @@ export async function POST(request: NextRequest) {
     books,
   };
 
-  // Generate PDF and CSV concurrently
+  // ── 2. Report. The lead is already safe; a render failure is still a 500
+  //       to the seller, but the row exists and carries the reference number.
   let pdfBuffer: Buffer;
   let csv: string;
   try {
@@ -82,21 +119,30 @@ export async function POST(request: NextRequest) {
       Promise.resolve(generateCSV(reportData)),
     ]);
   } catch (err) {
-    console.error('Report generation failed during submission:', err);
-    return NextResponse.json({ error: 'Failed to generate report' }, { status: 500 });
+    console.error(`Report generation failed for ${reference_number} (submission saved):`, err);
+    return NextResponse.json(
+      {
+        error: `Your submission ${reference_number} was received, but the report could not be generated. We have your details and will follow up by email.`,
+        reference_number,
+      },
+      { status: 500 },
+    );
   }
 
-  // Send emails concurrently; log but do not fail submission if email errors
-  const emailResults = await Promise.allSettled([
+  // ── 3. Emails — non-fatal, outcomes recorded on the row. ─────────────────
+  const [sellerResult, internalResult] = await Promise.allSettled([
     sendSellerConfirmation(reportData),
     sendInternalNotification(reportData, pdfBuffer, csv),
   ]);
-
-  for (const result of emailResults) {
+  for (const result of [sellerResult, internalResult]) {
     if (result.status === 'rejected') {
-      console.error('Email send error (non-fatal):', result.reason);
+      console.error(`Email send error for ${reference_number} (non-fatal):`, result.reason);
     }
   }
+  await recordEmailOutcomes(store, id, {
+    seller_email_sent: sellerResult.status === 'fulfilled',
+    internal_email_sent: internalResult.status === 'fulfilled',
+  });
 
   return NextResponse.json({
     reference_number,

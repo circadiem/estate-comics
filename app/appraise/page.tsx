@@ -71,12 +71,14 @@ function AdjustedOfferSummary({
   adjustment,
   onFormalSubmit,
   submitState,
+  submitError,
 }: {
   comics: ComicProcessingState[];
   questionnaire: SellerQuestionnaire;
   adjustment: GradeAdjustment;
   onFormalSubmit: () => void;
   submitState: 'idle' | 'submitting' | 'error';
+  submitError: string | null;
 }) {
   const completed = comics.filter(
     (c) => c.status === 'complete' && c.adjusted_offer,
@@ -153,8 +155,8 @@ function AdjustedOfferSummary({
         {submitState === 'submitting' ? 'Submitting…' : 'Submit for Formal Offer →'}
       </button>
       {submitState === 'error' && (
-        <p className="text-center text-xs text-red-600">
-          Submission failed — please try again or contact us directly.
+        <p role="alert" className="text-center text-xs text-red-600">
+          {submitError ?? 'Submission failed — please try again or contact us directly.'}
         </p>
       )}
       <p className="text-center text-xs text-gray-400">
@@ -215,6 +217,7 @@ export default function AppraisePage() {
   const [questionnaire, setQuestionnaire] = useState<SellerQuestionnaire | null>(null);
   const [adjustment, setAdjustment] = useState<GradeAdjustment | null>(null);
   const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'error'>('idle');
+  const [submitError, setSubmitError] = useState<string | null>(null);
   /** Latest adjustment, readable from inside the stable processOne callback so a
    *  book re-run after the questionnaire (photo retake) still gets adjusted_offer. */
   const adjustmentRef = useRef<GradeAdjustment | null>(null);
@@ -390,6 +393,7 @@ export default function AppraisePage() {
     setAdjustment(null);
     adjustmentRef.current = null;
     setSubmitState('idle');
+    setSubmitError(null);
     setSubmission(null);
   }
 
@@ -398,6 +402,7 @@ export default function AppraisePage() {
     const books = collectReportBooks(comics);
     if (books.length === 0) return;
     setSubmitState('submitting');
+    setSubmitError(null);
     try {
       const result = await apiPost<SubmissionResult>('/api/submit', {
         seller: questionnaire,
@@ -409,6 +414,7 @@ export default function AppraisePage() {
       setSubmitState('idle');
     } catch (err) {
       console.error('Formal submission failed:', err);
+      setSubmitError(err instanceof Error ? err.message : null);
       setSubmitState('error');
     }
   }
@@ -552,6 +558,7 @@ export default function AppraisePage() {
                 adjustment={adjustment}
                 onFormalSubmit={handleFormalSubmit}
                 submitState={submitState}
+                submitError={submitError}
               />
             </div>
             <div className="md:col-span-3">

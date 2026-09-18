@@ -28,7 +28,9 @@ default. From Project Settings → API, collect:
   bypasses row-level security. It never goes into client code or git.
 
 Claude Code produces `supabase/migrations/0001_init.sql`. Run it from the dashboard SQL editor
-or `supabase db push`. Confirm the `submissions`, `images`, and `books` tables exist afterward.
+or `supabase db push`. Confirm the `submissions` and `submission_books` tables and the
+`create_submission` function exist afterward. (The `images` table arrives with R2 in a second
+migration — see the schema resolution in `docs/05-build-sequence.md`.)
 
 **Cloudflare R2.** Bucket `estatecomics-uploads`. Collect the account ID, access key ID, and
 secret. No photo is stored anywhere today — this is the fix.
