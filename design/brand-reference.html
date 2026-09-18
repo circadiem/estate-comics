@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Provenance — Estate Comics Brand Reference</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Nunito+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    color-scheme: light;
+    --charcoalBrown:#2E2620; --darkUmber:#4A3F35; --umber:#6F6358; --patina:#7D6E5C;
+    --antiqueGold:#A67C52; --vellum:#F3EDE4; --bisque:#E8DFD2; --ivory:#FAF6F0;
+    --warmBlack:#1E1A16; --sage:#8A9A7E; --mutedRed:#A65252;
+    --display:'Cormorant Garamond',Georgia,serif;
+    --body:'Nunito Sans',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--vellum); color:var(--charcoalBrown);
+    font-family:var(--body); font-size:16px; line-height:1.65;
+  }
+  .wrap{max-width:900px;margin:0 auto;padding:0 24px}
+
+  /* ── Masthead: the one bold moment ───────────────────────── */
+  .masthead{padding:72px 24px 56px;text-align:center;border-bottom:1px solid var(--bisque)}
+  .wordmark{font-family:var(--display);font-weight:700;font-size:clamp(38px,9vw,64px);
+    line-height:1;color:var(--charcoalBrown);letter-spacing:-.01em}
+  .hair{height:1px;background:var(--antiqueGold);max-width:340px;margin:14px auto 12px}
+  .descriptor{font-family:var(--display);font-style:italic;font-size:clamp(14px,3.4vw,19px);
+    color:var(--patina);letter-spacing:.02em}
+  .tagline{margin-top:34px;font-family:var(--display);font-size:clamp(17px,4vw,22px);
+    color:var(--darkUmber)}
+
+  section{padding:56px 0;border-bottom:1px solid var(--bisque)}
+  section:last-of-type{border-bottom:0}
+  h2{font-family:var(--display);font-weight:600;font-size:30px;line-height:1.2;
+    color:var(--darkUmber);margin:0 0 6px}
+  .sub{font-family:var(--display);font-style:italic;font-size:19px;color:var(--patina);
+    margin:0 0 28px;line-height:1.5}
+  p{max-width:68ch;margin:0 0 16px}
+  .note{font-size:14px;line-height:1.55;color:var(--umber);max-width:68ch}
+
+  /* ── Palette ─────────────────────────────────────────────── */
+  .sw{display:flex;align-items:center;gap:16px;padding:12px 0;border-bottom:1px solid var(--bisque)}
+  .sw:last-child{border-bottom:0}
+  .chip{width:52px;height:52px;flex:none;border-radius:2px;border:1px solid rgba(46,38,32,.14)}
+  .sw-body{min-width:0;flex:1}
+  .sw-name{font-weight:600;font-size:15px}
+  .sw-hex{font-size:13px;color:var(--umber);letter-spacing:.04em}
+  .sw-role{font-size:13px;color:var(--umber);margin-top:2px}
+  .ratio{font-size:13px;font-weight:600;white-space:nowrap;text-align:right}
+  .pass{color:var(--darkUmber)} .warn{color:var(--mutedRed)}
+
+  /* ── Type specimen ───────────────────────────────────────── */
+  .spec{padding:14px 0;border-bottom:1px solid var(--bisque)}
+  .spec:last-child{border-bottom:0}
+  .spec-meta{font-size:12px;color:var(--patina);letter-spacing:.06em;margin-bottom:6px}
+  .t-display{font-family:var(--display);font-weight:600;font-size:clamp(34px,7vw,56px);line-height:1.1;color:var(--darkUmber)}
+  .t-h1{font-family:var(--display);font-weight:600;font-size:clamp(28px,5.5vw,40px);line-height:1.15;color:var(--darkUmber)}
+  .t-h3{font-family:var(--display);font-weight:500;font-size:23px;line-height:1.3;color:var(--darkUmber)}
+  .t-sub{font-family:var(--display);font-style:italic;font-size:19px;color:var(--patina)}
+  .t-body{font-size:16px;line-height:1.65}
+  .t-sm{font-size:14px;line-height:1.55;color:var(--umber)}
+  .t-ref{font-size:14px;font-weight:600;letter-spacing:.04em}
+
+  /* ── Components ──────────────────────────────────────────── */
+  .card{background:var(--ivory);border:1px solid var(--bisque);border-radius:2px;padding:24px;margin-bottom:16px}
+  .btn{font-family:var(--body);font-weight:600;font-size:15px;border-radius:2px;
+    padding:14px 28px;border:1px solid transparent;cursor:pointer}
+  .btn-primary{background:var(--darkUmber);color:var(--vellum)}
+  .btn-primary:hover{background:var(--warmBlack)}
+  .btn-secondary{background:transparent;color:var(--darkUmber);border-color:var(--patina)}
+  .btns{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px}
+  label{display:block;font-weight:600;font-size:13px;margin-bottom:4px}
+  .help{font-size:14px;color:var(--umber);margin-bottom:8px}
+  input{width:100%;font-family:var(--body);font-size:16px;padding:11px 13px;
+    background:var(--ivory);border:1px solid var(--bisque);border-radius:2px;color:var(--charcoalBrown)}
+  input:focus{outline:2px solid var(--antiqueGold);outline-offset:2px;border-color:var(--antiqueGold)}
+  .err{color:var(--mutedRed);font-size:14px;margin-top:6px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .cf{border-radius:2px;font-weight:600;font-size:12px;padding:4px 10px;color:var(--charcoalBrown)}
+
+  /* ── Appraisal table + PDF header ────────────────────────── */
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{border-collapse:collapse;width:100%;min-width:520px;font-size:14px}
+  th{text-align:left;font-weight:600;color:var(--darkUmber);padding:10px 12px;
+    border-bottom:1px solid var(--antiqueGold);white-space:nowrap}
+  td{padding:13px 12px;border-bottom:1px solid rgba(46,38,32,.07)}
+  tbody tr:nth-child(even){background:var(--bisque)}
+  .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+  .pdf{background:var(--ivory);border:1px solid var(--bisque);border-radius:2px;overflow:hidden}
+  .pdf-rule{height:5px;background:var(--darkUmber)}
+  .pdf-head{padding:26px 24px 20px;text-align:center}
+  .pdf-mark{font-family:var(--display);font-weight:700;font-size:27px;color:var(--charcoalBrown)}
+  .pdf-hair{height:1px;background:var(--antiqueGold);max-width:200px;margin:9px auto}
+  .pdf-desc{font-family:var(--display);font-style:italic;font-size:13px;color:var(--patina)}
+  .pdf-meta{background:var(--vellum);padding:12px 24px;display:flex;justify-content:space-between;
+    gap:12px;flex-wrap:wrap;font-size:13px;color:var(--umber);border-top:1px solid var(--bisque);
+    border-bottom:1px solid var(--bisque)}
+  .cards3{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--bisque)}
+  .stat{background:var(--ivory);padding:20px 22px;border-top:2px solid var(--antiqueGold)}
+  .stat-l{font-size:13px;color:var(--umber);margin-bottom:4px}
+  .stat-v{font-family:var(--display);font-weight:600;font-size:29px;line-height:1.1;color:var(--darkUmber)}
+  .pdf-foot{padding:14px 24px;font-size:12px;color:var(--patina);text-align:center}
+
+  /* ── Do / don't ──────────────────────────────────────────── */
+  .rule-row{display:flex;gap:14px;padding:13px 0;border-bottom:1px solid var(--bisque);align-items:flex-start}
+  .rule-row:last-child{border-bottom:0}
+  .mark{flex:none;width:22px;height:22px;border-radius:2px;display:grid;place-items:center;
+    font-size:13px;font-weight:700;margin-top:1px}
+  .yes{background:var(--sage);color:var(--charcoalBrown)}
+  .no{background:var(--mutedRed);color:var(--ivory)}
+  .rule-row div{font-size:15px;line-height:1.55}
+
+  footer{padding:44px 24px 64px;text-align:center;font-size:13px;color:var(--patina)}
+  @media (max-width:600px){ section{padding:44px 0} h2{font-size:26px} .sub{font-size:17px} }
+</style>
+</head>
+<body>
+
+<div class="masthead">
+  <div class="wordmark">EstateComics</div>
+  <div class="hair"></div>
+  <div class="descriptor">Professional Comic Book Estate Services</div>
+  <div class="tagline">Every collection has a story. We honor it.</div>
+</div>
+
+<div class="wrap">
+
+<section>
+  <h2>Provenance</h2>
+  <p class="sub">Heritage meets precision. The rendered specimen of the Estate Comics design system.</p>
+  <p>Archival design, museum catalogues, and the quiet confidence of institutions that have done
+  one thing well for a very long time. The audience is an executor, an attorney, or an adult
+  child holding a longbox they did not ask for. Nothing here should suggest a hobby shop.</p>
+  <p class="note">The wordmark's gold hairline is part of the logo, not decoration around it. It
+  recurs as the section rule, the table header rule, the PDF header, and the email divider. That
+  repetition is what makes the brand read as one thing.</p>
+</section>
+
+<section>
+  <h2>Palette</h2>
+  <p class="sub">Contrast measured against vellum. AA needs 4.5:1 for body, 3:1 for large text.</p>
+
+  <div class="sw"><div class="chip" style="background:#2E2620"></div>
+    <div class="sw-body"><div class="sw-name">Charcoal Brown</div><div class="sw-hex">#2E2620</div>
+    <div class="sw-role">Primary body text</div></div><div class="ratio pass">12.7:1</div></div>
+
+  <div class="sw"><div class="chip" style="background:#4A3F35"></div>
+    <div class="sw-body"><div class="sw-name">Dark Umber</div><div class="sw-hex">#4A3F35</div>
+    <div class="sw-role">Headings, nav, footer, buttons</div></div><div class="ratio pass">8.8:1</div></div>
+
+  <div class="sw"><div class="chip" style="background:#6F6358"></div>
+    <div class="sw-body"><div class="sw-name">Umber</div><div class="sw-hex">#6F6358</div>
+    <div class="sw-role">Secondary text, captions, help</div></div><div class="ratio pass">5.0:1</div></div>
+
+  <div class="sw"><div class="chip" style="background:#A65252"></div>
+    <div class="sw-body"><div class="sw-name">Muted Red</div><div class="sw-hex">#A65252</div>
+    <div class="sw-role">Errors, restoration suspected</div></div><div class="ratio pass">4.6:1</div></div>
+
+  <div class="sw"><div class="chip" style="background:#7D6E5C"></div>
+    <div class="sw-body"><div class="sw-name">Patina</div><div class="sw-hex">#7D6E5C</div>
+    <div class="sw-role">Large text only — 18px and up</div></div><div class="ratio warn">4.2:1</div></div>
+
+  <div class="sw"><div class="chip" style="background:#A67C52"></div>
+    <div class="sw-body"><div class="sw-name">Antique Gold</div><div class="sw-hex">#A67C52</div>
+    <div class="sw-role">Rules and borders. Not a text color.</div></div><div class="ratio warn">3.2:1</div></div>
+
+  <div class="sw"><div class="chip" style="background:#8A9A7E"></div>
+    <div class="sw-body"><div class="sw-name">Accent Sage</div><div class="sw-hex">#8A9A7E</div>
+    <div class="sw-role">Fill only — needs dark text on top</div></div><div class="ratio warn">2.6:1</div></div>
+
+  <div class="sw"><div class="chip" style="background:#F3EDE4"></div>
+    <div class="sw-body"><div class="sw-name">Vellum</div><div class="sw-hex">#F3EDE4</div>
+    <div class="sw-role">Page background</div></div><div class="ratio">—</div></div>
+
+  <div class="sw"><div class="chip" style="background:#E8DFD2"></div>
+    <div class="sw-body"><div class="sw-name">Bisque</div><div class="sw-hex">#E8DFD2</div>
+    <div class="sw-role">Zebra rows, borders, inset panels</div></div><div class="ratio">—</div></div>
+
+  <div class="sw"><div class="chip" style="background:#FAF6F0"></div>
+    <div class="sw-body"><div class="sw-name">Ivory</div><div class="sw-hex">#FAF6F0</div>
+    <div class="sw-role">Cards and raised surfaces</div></div><div class="ratio">—</div></div>
+
+  <div class="sw"><div class="chip" style="background:#1E1A16"></div>
+    <div class="sw-body"><div class="sw-name">Warm Black</div><div class="sw-hex">#1E1A16</div>
+    <div class="sw-role">Deepest ground, PDF rules</div></div><div class="ratio">—</div></div>
+
+  <p class="note" style="margin-top:20px">The commonest failure here is antique gold used for
+  small labels or link text because it looks handsome. At 14px it is unreadable for the person
+  this product is for. Use umber.</p>
+</section>
+
+<section>
+  <h2>Typography</h2>
+  <p class="sub">Cormorant Garamond for display. Nunito Sans for everything under 20px.</p>
+
+  <div class="spec"><div class="spec-meta">Display · Cormorant 600 · 56/1.1</div>
+    <div class="t-display">Thirty years of hands on paper</div></div>
+
+  <div class="spec"><div class="spec-meta">H1 · Cormorant 600 · 40/1.15</div>
+    <div class="t-h1">Estate comic book appraisal</div></div>
+
+  <div class="spec"><div class="spec-meta">H3 · Cormorant 500 · 23/1.3</div>
+    <div class="t-h3">What happens after you submit</div></div>
+
+  <div class="spec"><div class="spec-meta">Subhead · Cormorant italic 400 · 19/1.5</div>
+    <div class="t-sub">A documented valuation, suitable for probate.</div></div>
+
+  <div class="spec"><div class="spec-meta">Body · Nunito 400 · 16/1.65</div>
+    <div class="t-body">For over thirty years we have helped families, attorneys, and executors
+    navigate the valuation and sale of inherited comic book collections. Every offer is based on
+    recorded market sales at the condition we assess, and every offer is contingent on physical
+    inspection. We will show you how we arrived at the number.</div></div>
+
+  <div class="spec"><div class="spec-meta">Small · Nunito 400 · 14/1.55</div>
+    <div class="t-sm">Values reflect recent recorded sales at the assessed grade. Offer valid 14 days.</div></div>
+
+  <div class="spec"><div class="spec-meta">Reference number · Nunito 600 · 14 · +0.04em</div>
+    <div class="t-ref">EC-20260918-0417</div></div>
+
+  <p class="note" style="margin-top:20px">Cormorant gets fragile below 20px — never use it under
+  18px except in the wordmark. Give serif text a little more line-height than the sans. Body
+  measure 62–72 characters. No third family, and no monospace face for data labels.</p>
+</section>
+
+<section>
+  <h2>Components</h2>
+  <p class="sub">Elevation is a border and a fill. There are no shadows in this system.</p>
+
+  <div class="btns">
+    <button class="btn btn-primary">Get your appraisal</button>
+    <button class="btn btn-secondary">See how it works</button>
+  </div>
+
+  <div class="card">
+    <label for="cnt">About how many books are in the collection?</label>
+    <div class="help">An estimate is fine. We work with collections of 100 books or more.</div>
+    <input id="cnt" type="text" placeholder="e.g. 400" aria-describedby="cnt-e">
+    <div class="err" id="cnt-e">Enter a number so we can size the appraisal.</div>
+    <div class="chips">
+      <span class="cf" style="background:rgba(138,154,126,.34)">High confidence</span>
+      <span class="cf" style="background:rgba(166,124,82,.30)">Needs review</span>
+      <span class="cf" style="background:rgba(166,82,82,.28)">Manual verification</span>
+    </div>
+  </div>
+
+  <p class="note">Buttons say what happens. Labels sit above the field, help text under the
+  label. Errors state what to fix and never apologize. Focus rings are visible for everyone —
+  this product is shown to attorneys and keyboard access is not optional.</p>
+</section>
+
+<section>
+  <h2>The appraisal report</h2>
+  <p class="sub">The most important surface in the product. Style it first, not last.</p>
+  <p>This is the artifact a seller forwards to their attorney, their sibling, and their
+  accountant. It does the job a storefront does for a traditional dealer.</p>
+
+  <div class="pdf">
+    <div class="pdf-rule"></div>
+    <div class="pdf-head">
+      <div class="pdf-mark">EstateComics</div>
+      <div class="pdf-hair"></div>
+      <div class="pdf-desc">Collection Appraisal</div>
+    </div>
+    <div class="pdf-meta">
+      <span>Reference EC-20260918-0417</span>
+      <span>18 September 2026</span>
+      <span>412 books assessed</span>
+    </div>
+    <div class="cards3">
+      <div class="stat"><div class="stat-l">Books identified</div><div class="stat-v">412</div></div>
+      <div class="stat"><div class="stat-l">Fair market value</div><div class="stat-v">$18.4–24.1k</div></div>
+      <div class="stat"><div class="stat-l">Cash offer</div><div class="stat-v">$7.9–10.6k</div></div>
+    </div>
+    <div class="scroll" style="padding:20px 24px">
+      <table>
+        <thead><tr><th>Title</th><th>Issue</th><th>Grade</th><th class="num">FMV</th><th class="num">Offer</th></tr></thead>
+        <tbody>
+          <tr><td>The Incredible Hulk</td><td>181</td><td>5.0–6.0</td><td class="num">$4,200</td><td class="num">$2,520</td></tr>
+          <tr><td>Marvel Spotlight</td><td>5</td><td>4.5–5.5</td><td class="num">$1,150</td><td class="num">$610</td></tr>
+          <tr><td>Giant-Size X-Men</td><td>1</td><td>3.5–4.5</td><td class="num">$2,900</td><td class="num">$1,595</td></tr>
+          <tr><td>The Amazing Spider-Man</td><td>129</td><td>5.5–6.5</td><td class="num">$1,800</td><td class="num">$990</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="pdf-foot">Estate Comics · Powered by Legends of Superheros · Est. 1993</div>
+  </div>
+
+  <p class="note" style="margin-top:20px">Key issues come before the full inventory. Hidden Gems
+  — <em>"Books you might not know are valuable"</em> — sits in a bisque panel and builds more
+  trust than anything else in the document. Verify a grayscale print still separates the rows.</p>
+</section>
+
+<section>
+  <h2>Rules</h2>
+  <p class="sub">The short list that keeps this from drifting into a template.</p>
+
+  <div class="rule-row"><span class="mark yes">✓</span><div>One border radius — 2px — on everything. Not zero, not rounded.</div></div>
+  <div class="rule-row"><span class="mark yes">✓</span><div>Elevation is a 1px bisque border and an ivory fill on the vellum ground.</div></div>
+  <div class="rule-row"><span class="mark yes">✓</span><div>Left-aligned throughout. Only the wordmark and the PDF header are centered.</div></div>
+  <div class="rule-row"><span class="mark yes">✓</span><div>One animated moment: books resolving into the results feed as photos process.</div></div>
+  <div class="rule-row"><span class="mark no">✕</span><div>No drop shadows, no gradients, no second accent color.</div></div>
+  <div class="rule-row"><span class="mark no">✕</span><div>No tracked-out all-caps eyebrow labels. The italic Cormorant subhead does that job.</div></div>
+  <div class="rule-row"><span class="mark no">✕</span><div>No arrow glyphs appended to link or button text.</div></div>
+  <div class="rule-row"><span class="mark no">✕</span><div>Nothing comic-book-y: no primary colors, halftone, or bold slab display.</div></div>
+  <div class="rule-row"><span class="mark no">✕</span><div>No reference to The Corner Box, anywhere, in any form.</div></div>
+</section>
+
+</div>
+
+<footer>
+  Provenance · Estate Comics brand reference<br>
+  Specification: docs/04-brand-provenance.md · Tokens: design/tokens.css
+</footer>
+
+</body>
+</html>

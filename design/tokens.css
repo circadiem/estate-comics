@@ -1,0 +1,78 @@
+/* Estate Comics — Provenance design tokens
+ * Source of truth: docs/04-brand-provenance.md
+ * Import once in app/globals.css, above Tailwind's directives.
+ */
+
+:root {
+  /* ── Palette ─────────────────────────────────────────────── */
+  --ec-charcoal-brown: #2E2620;  /* body text            12.7:1 on vellum */
+  --ec-dark-umber:     #4A3F35;  /* headings, nav, footer  8.8:1 */
+  --ec-umber:          #6F6358;  /* secondary text         5.0:1 */
+  --ec-patina:         #7D6E5C;  /* large text only        4.2:1 */
+  --ec-antique-gold:   #A67C52;  /* RULES ONLY — not text  3.2:1 */
+  --ec-vellum:         #F3EDE4;  /* page background */
+  --ec-bisque:         #E8DFD2;  /* zebra rows, inset panels */
+  --ec-ivory:          #FAF6F0;  /* cards, raised surfaces */
+  --ec-warm-black:     #1E1A16;  /* deepest ground, PDF rules */
+
+  /* Status. Sage is a fill, never a text color. */
+  --ec-sage:           #8A9A7E;  /* confirmed / high confidence */
+  --ec-muted-red:      #A65252;  /* error, restoration suspected */
+
+  /* ── Semantic aliases — prefer these in components ───────── */
+  --ec-bg:             var(--ec-vellum);
+  --ec-surface:        var(--ec-ivory);
+  --ec-surface-alt:    var(--ec-bisque);
+  --ec-text:           var(--ec-charcoal-brown);
+  --ec-text-secondary: var(--ec-umber);
+  --ec-text-muted:     var(--ec-patina);   /* 18px+ only */
+  --ec-heading:        var(--ec-dark-umber);
+  --ec-rule:           var(--ec-antique-gold);
+  --ec-border:         var(--ec-bisque);
+  --ec-focus:          var(--ec-antique-gold);
+
+  /* ── Type ────────────────────────────────────────────────── */
+  --ec-font-display: var(--font-cormorant), Georgia, 'Times New Roman', serif;
+  --ec-font-body:    var(--font-nunito), system-ui, -apple-system, sans-serif;
+
+  --ec-text-display: 3.5rem;   /* 56 / 1.1  — hero only */
+  --ec-text-h1:      2.5rem;   /* 40 / 1.15 */
+  --ec-text-h2:      1.875rem; /* 30 / 1.2  */
+  --ec-text-h3:      1.4375rem;/* 23 / 1.3  */
+  --ec-text-subhead: 1.1875rem;/* 19 / 1.5  — Cormorant italic, patina */
+  --ec-text-lg:      1.125rem; /* 18 / 1.65 */
+  --ec-text-base:    1rem;     /* 16 / 1.65 */
+  --ec-text-sm:      0.875rem; /* 14 / 1.55 */
+  --ec-text-label:   0.8125rem;/* 13 / 1.4  — weight 600, sentence case */
+
+  /* ── Space, shape, motion ────────────────────────────────── */
+  --ec-radius: 2px;            /* ONE radius across the system */
+  --ec-rule-width: 1px;
+  --ec-measure: 68ch;          /* prose line length */
+  --ec-section-gap: 4.5rem;    /* 72px desktop */
+  --ec-shadow: none;           /* elevation is border + fill, never shadow */
+}
+
+@media (max-width: 640px) {
+  :root {
+    --ec-text-display: 2.375rem; /* 38 */
+    --ec-text-h1:      1.875rem; /* 30 */
+    --ec-text-h2:      1.5rem;   /* 24 */
+    --ec-section-gap:  3rem;     /* 48 */
+    /* body stays 16px — do not shrink it */
+  }
+}
+
+/* Focus is visible for everyone, always. The audience includes keyboard
+   and screen-reader users, and this product is shown to attorneys. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--ec-focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
