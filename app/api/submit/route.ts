@@ -11,17 +11,18 @@
 // A database failure returns 500 with a retry message. A seller never again
 // receives a reference number for a lead that does not exist.
 //
-// Known limitation (closed by WO-05): per-book valuation/offer figures are
-// still client-echoed and stored as validated, not yet recomputed here.
+// Money math (WO-05): the client sends seller + per-book identification,
+// condition and valuation ONLY. Adjustment, offers and the summary are
+// recomputed here (lib/services/appraisal.ts) and returned in the response;
+// the confirmation screen renders from that response. See the residual-risk
+// note in appraisal.ts regarding client-echoed valuations.
 
 import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
-import { SellerQuestionnaireSchema } from '@/lib/schemas/questionnaire';
-import { IdentificationResultSchema } from '@/lib/schemas/identification';
-import { ConditionResultSchema } from '@/lib/schemas/condition';
-import { ValuationResultSchema } from '@/lib/schemas/valuation';
-import { OfferResultSchema } from '@/lib/schemas/offer';
-import { buildCollectionSummary } from '@/lib/services/offer';
+import {
+  AppraisalInputSchema,
+  computeAppraisal,
+  summarizeAppraisal,
+} from '@/lib/services/appraisal';
 import { generatePDF } from '@/lib/services/pdf-generator';
 import { generateCSV } from '@/lib/services/csv-generator';
 import { sendSellerConfirmation, sendInternalNotification } from '@/lib/services/email';
@@ -34,26 +35,6 @@ import {
 import { isBelowMinimum } from '@/lib/utils/collection-size';
 import type { ReportData } from '@/lib/types/report';
 
-const GradeAdjustmentSchema = z.object({
-  fmv_multiplier: z.number(),
-  restoration_flag: z.boolean(),
-  adjustment_reasons: z.array(z.string()),
-});
-
-const ReportBookSchema = z.object({
-  identification: IdentificationResultSchema,
-  condition: ConditionResultSchema,
-  valuation: ValuationResultSchema,
-  offer: OfferResultSchema,
-  adjusted_offer: OfferResultSchema,
-});
-
-const RequestBodySchema = z.object({
-  seller: SellerQuestionnaireSchema,
-  adjustment: GradeAdjustmentSchema,
-  books: z.array(ReportBookSchema).min(1),
-});
-
 const RETRY_MESSAGE =
   'We could not save your submission. Please try again in a moment, or email us and we will take it from there.';
 
@@ -65,7 +46,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const parsed = RequestBodySchema.safeParse(body);
+  const parsed = AppraisalInputSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       { error: 'Invalid request body', details: parsed.error.flatten() },
@@ -73,7 +54,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { seller, adjustment, books } = parsed.data;
+  const { seller } = parsed.data;
+  // Server-side recompute: adjustment, base offer, adjusted offer per book.
+  const { adjustment, books } = computeAppraisal(parsed.data);
   const below_minimum = isBelowMinimum(seller.estimated_count);
 
   // ── 1. Durable write. Mints the reference number; nothing else does. ──────
@@ -90,7 +73,7 @@ export async function POST(request: NextRequest) {
     persisted = await createSubmission(
       store,
       { seller, adjustment, books, below_minimum },
-      (reference_number) => buildCollectionSummary(books, reference_number),
+      (reference_number) => summarizeAppraisal(books, reference_number),
     );
   } catch (err) {
     console.error('Submission persistence failed:', err);
@@ -144,11 +127,15 @@ export async function POST(request: NextRequest) {
     internal_email_sent: internalResult.status === 'fulfilled',
   });
 
+  // The authoritative figures. The client renders its confirmation from these,
+  // not from anything it computed locally.
   return NextResponse.json({
     reference_number,
     submitted_at,
     generated_at: submitted_at,
+    adjustment,
     summary,
+    books,
     pdf_base64: pdfBuffer.toString('base64'),
     csv,
   });

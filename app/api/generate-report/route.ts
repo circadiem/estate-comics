@@ -5,41 +5,26 @@
 // (WO-02). The seller flow no longer calls it — /api/submit issues the report
 // with the submission — but it remains for re-generating a report under the
 // same number (admin review queue, WO-12).
+//
+// Money math is recomputed server-side from seller + per-book identification,
+// condition and valuation (WO-05). No offer fields are accepted from the client.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { SellerQuestionnaireSchema } from '@/lib/schemas/questionnaire';
-import { IdentificationResultSchema } from '@/lib/schemas/identification';
-import { ConditionResultSchema } from '@/lib/schemas/condition';
-import { ValuationResultSchema } from '@/lib/schemas/valuation';
-import { OfferResultSchema } from '@/lib/schemas/offer';
+import {
+  AppraisalInputSchema,
+  computeAppraisal,
+  summarizeAppraisal,
+} from '@/lib/services/appraisal';
 import { REFERENCE_NUMBER_REGEX } from '@/lib/utils/reference-number';
-import { buildCollectionSummary } from '@/lib/services/offer';
 import { generatePDF } from '@/lib/services/pdf-generator';
 import { generateCSV } from '@/lib/services/csv-generator';
 import type { ReportData } from '@/lib/types/report';
 
-const GradeAdjustmentSchema = z.object({
-  fmv_multiplier: z.number(),
-  restoration_flag: z.boolean(),
-  adjustment_reasons: z.array(z.string()),
-});
-
-const ReportBookSchema = z.object({
-  identification: IdentificationResultSchema,
-  condition: ConditionResultSchema,
-  valuation: ValuationResultSchema,
-  offer: OfferResultSchema,
-  adjusted_offer: OfferResultSchema,
-});
-
-const RequestBodySchema = z.object({
+const RequestBodySchema = AppraisalInputSchema.extend({
   reference_number: z
     .string()
     .regex(REFERENCE_NUMBER_REGEX, 'reference_number must match EC-YYYYMMDD-XXXX'),
-  seller: SellerQuestionnaireSchema,
-  adjustment: GradeAdjustmentSchema,
-  books: z.array(ReportBookSchema).min(1),
 });
 
 export async function POST(request: NextRequest) {
@@ -58,9 +43,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { reference_number, seller, adjustment, books } = parsed.data;
+  const { reference_number, seller } = parsed.data;
+  const { adjustment, books } = computeAppraisal(parsed.data);
   const generated_at = new Date().toISOString();
-  const summary = buildCollectionSummary(books, reference_number);
+  const summary = summarizeAppraisal(books, reference_number);
 
   const reportData: ReportData = {
     reference_number,
@@ -86,7 +72,9 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     reference_number,
     generated_at,
+    adjustment,
     summary,
+    books,
     pdf_base64: pdfBuffer.toString('base64'),
     csv,
   });

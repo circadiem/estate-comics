@@ -7,6 +7,10 @@
 // Submission: /api/submit mints the ONE reference number for the session and
 // returns the PDF + CSV under it. The report is issued with the submission,
 // never before it, so a session can never carry two numbers (WO-02).
+// Money math: the browser sends only identification, condition and valuation
+// per book. Offers, the adjustment and the summary are recomputed server-side
+// and the confirmation renders from the server response (WO-05). Any offer
+// arithmetic in this file is a DISPLAY PREVIEW ONLY.
 
 import { useCallback, useRef, useState } from 'react';
 import UploadComponent from '@/components/upload';
@@ -22,6 +26,7 @@ import type { OfferResult } from '@/lib/schemas/offer';
 import type { SellerQuestionnaire } from '@/lib/schemas/questionnaire';
 import type { CollectionSummary } from '@/lib/schemas/offer';
 import type { ReportBook } from '@/lib/types/report';
+import type { AppraisalBookInput } from '@/lib/services/appraisal';
 import {
   computeGradeAdjustment,
   applyAdjustmentToOffer,
@@ -177,29 +182,28 @@ interface SubmissionResult {
   reference_number: string;
   submitted_at: string;
   generated_at: string;
+  /** Server-recomputed from the questionnaire */
+  adjustment: GradeAdjustment;
+  /** Server-recomputed summary */
   summary: CollectionSummary;
+  /** Server-recomputed per-book offers — the authoritative figures */
+  books: ReportBook[];
   pdf_base64: string;
   csv: string;
 }
 
-/** Books that completed the full pipeline and have an adjusted offer. */
-function collectReportBooks(comics: ComicProcessingState[]): ReportBook[] {
-  const books: ReportBook[] = [];
+/**
+ * The submit payload: pipeline outputs only. Offers are deliberately NOT
+ * sent — the server recomputes them and would strip them anyway.
+ */
+function collectAppraisalBooks(comics: ComicProcessingState[]): AppraisalBookInput[] {
+  const books: AppraisalBookInput[] = [];
   for (const c of comics) {
-    if (
-      c.status === 'complete' &&
-      c.identification &&
-      c.condition &&
-      c.valuation &&
-      c.offer &&
-      c.adjusted_offer
-    ) {
+    if (c.status === 'complete' && c.identification && c.condition && c.valuation) {
       books.push({
         identification: c.identification,
         condition: c.condition,
         valuation: c.valuation,
-        offer: c.offer,
-        adjusted_offer: c.adjusted_offer,
       });
     }
   }
@@ -303,6 +307,7 @@ export default function AppraisePage() {
         return;
       }
 
+      // DISPLAY PREVIEW ONLY — server recomputes on submit (WO-05)
       const adj = adjustmentRef.current;
       updateComic(img.id, {
         status: 'complete',
@@ -372,6 +377,8 @@ export default function AppraisePage() {
   }
 
   function handleQuestionnaireSubmit(data: SellerQuestionnaire) {
+    // DISPLAY PREVIEW ONLY. The same functions run server-side on submit and
+    // the confirmation screen renders from the server's numbers, not these.
     const adj = computeGradeAdjustment(data);
     adjustmentRef.current = adj;
     setQuestionnaire(data);
@@ -398,15 +405,14 @@ export default function AppraisePage() {
   }
 
   async function handleFormalSubmit() {
-    if (!questionnaire || !adjustment) return;
-    const books = collectReportBooks(comics);
+    if (!questionnaire) return;
+    const books = collectAppraisalBooks(comics);
     if (books.length === 0) return;
     setSubmitState('submitting');
     setSubmitError(null);
     try {
       const result = await apiPost<SubmissionResult>('/api/submit', {
         seller: questionnaire,
-        adjustment,
         books,
       });
       setSubmission(result);
@@ -571,7 +577,7 @@ export default function AppraisePage() {
       )}
 
       {/* SUBMITTED */}
-      {phase === 'submitted' && submission && questionnaire && adjustment && (
+      {phase === 'submitted' && submission && questionnaire && (
         <div className="mx-auto max-w-4xl">
           <div className="mx-auto max-w-lg text-center">
             {/* Checkmark */}
@@ -661,16 +667,17 @@ export default function AppraisePage() {
 
             </div>
 
-          {/* On-screen copy of the report, rendered from the server response */}
+          {/* On-screen copy of the report — every figure comes from the server
+              response, never from the local preview state */}
           <div className="mt-4">
             <AppraisalReport
               data={{
                 reference_number: submission.reference_number,
                 generated_at: submission.generated_at,
                 seller: questionnaire,
-                adjustment,
+                adjustment: submission.adjustment,
                 summary: submission.summary,
-                books: collectReportBooks(comics),
+                books: submission.books,
               }}
             />
           </div>
