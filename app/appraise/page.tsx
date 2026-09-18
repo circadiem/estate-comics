@@ -7,6 +7,10 @@
 // Submission: /api/submit mints the ONE reference number for the session and
 // returns the PDF + CSV under it. The report is issued with the submission,
 // never before it, so a session can never carry two numbers (WO-02).
+// Storage (Stage 2, R2): each photo is uploaded once via /api/upload and the
+// pipeline then references its image_key, so nothing large crosses the uplink
+// twice and the report can show covers. When storage is unavailable the page
+// falls back to inline images exactly as before; nothing is stored.
 // Resilience (WO-06): books run through a concurrency pool of
 // PIPELINE_CONCURRENCY; errored books are individually retryable; after each
 // book settles the session is saved to localStorage (results only, never the
@@ -67,6 +71,57 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
     throw new Error(data.error ?? `Request to ${path} failed (${res.status})`);
   }
   return res.json() as Promise<T>;
+}
+
+// ---------------------------------------------------------------------------
+// Upload (R2) — once per photo, with graceful fallback
+// ---------------------------------------------------------------------------
+
+/** What processOne needs: an id and either a stored key or the bytes. */
+interface PipelineInput {
+  id: string;
+  originalName: string;
+  image_key?: string;
+  processedBase64?: string;
+  mimeType?: string;
+  thumbnailDataUrl?: string;
+}
+
+class StorageUnavailable extends Error {}
+
+/**
+ * Upload the processed photo (and a small thumbnail for the report) to R2.
+ * Throws StorageUnavailable when the server reports storage is not configured
+ * so the caller can fall back to inline images for the rest of the session.
+ */
+async function uploadImage(
+  sessionId: string,
+  input: PipelineInput,
+  thumbnailBase64: string | null,
+): Promise<string> {
+  const res = await fetch('/api/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      session_id: sessionId,
+      image_id: crypto.randomUUID(),
+      image_base64: input.processedBase64,
+      thumbnail_base64: thumbnailBase64 ?? undefined,
+    }),
+  });
+  if (res.status === 503) throw new StorageUnavailable();
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+    throw new Error(data.message ?? data.error ?? `Upload failed (${res.status})`);
+  }
+  const { image_key } = (await res.json()) as { image_key: string };
+  return image_key;
+}
+
+/** Strip the data-URL prefix so only base64 is sent. */
+function base64Of(dataUrl: string): string | null {
+  const i = dataUrl.indexOf('base64,');
+  return i === -1 ? null : dataUrl.slice(i + 'base64,'.length);
 }
 
 // ---------------------------------------------------------------------------
@@ -252,6 +307,7 @@ function collectAppraisalBooks(comics: ComicProcessingState[]): AppraisalBookInp
   for (const c of comics) {
     if (c.status === 'complete' && c.identification && c.condition && c.valuation) {
       books.push({
+        image_key: c.image_key ?? null,
         identification: c.identification,
         condition: c.condition,
         valuation: c.valuation,
@@ -282,6 +338,10 @@ export default function AppraisePage() {
   const thumbsRef = useRef<Map<string, string>>(new Map());
   /** Monotonic counter so a slow persist never overwrites a newer one. */
   const persistSeq = useRef(0);
+  /** Upload session id: the R2 key prefix for this appraisal. */
+  const sessionIdRef = useRef<string>(crypto.randomUUID());
+  /** null = unknown, false = server said storage_unavailable (fall back to inline). */
+  const storageAvailable = useRef<boolean | null>(null);
   /** The server's response to /api/submit — the single source of the
    *  reference number and the report rendered on the confirmation screen. */
   const [submission, setSubmission] = useState<SubmissionResult | null>(null);
@@ -295,15 +355,49 @@ export default function AppraisePage() {
     [],
   );
 
+  /**
+   * Upload once (R2) and return the input carrying its key. Falls back to the
+   * inline bytes if storage is off or the upload fails — the pipeline still runs.
+   */
+  const ensureUploaded = useCallback(
+    async (img: PipelineInput): Promise<PipelineInput> => {
+      if (img.image_key || !img.processedBase64 || storageAvailable.current === false) return img;
+      try {
+        const thumb = img.thumbnailDataUrl
+          ? base64Of(await shrinkThumbnail(img.thumbnailDataUrl, 240))
+          : null;
+        const image_key = await uploadImage(sessionIdRef.current, img, thumb);
+        storageAvailable.current = true;
+        updateComic(img.id, { image_key });
+        return { ...img, image_key };
+      } catch (err) {
+        if (err instanceof StorageUnavailable) {
+          storageAvailable.current = false; // inline for the rest of the session
+        } else {
+          console.warn('Photo upload failed; continuing with inline image:', err);
+        }
+        return img;
+      }
+    },
+    [updateComic],
+  );
+
   const processOne = useCallback(
-    async (img: ProcessedImage) => {
+    async (input: PipelineInput) => {
+      const img = await ensureUploaded(input);
+      const imageKey = img.image_key;
+      const imagePayload = imageKey
+        ? { image_key: imageKey }
+        : { imageBase64: img.processedBase64, mimeType: img.mimeType };
+      if (!imageKey && !img.processedBase64) {
+        updateComic(img.id, { status: 'image_needed', error: 'Photo no longer available' });
+        return;
+      }
+
       updateComic(img.id, { status: 'identifying' });
       let identification: IdentificationResult;
       try {
-        identification = await apiPost<IdentificationResult>('/api/identify', {
-          imageBase64: img.processedBase64,
-          mimeType: img.mimeType,
-        });
+        identification = await apiPost<IdentificationResult>('/api/identify', imagePayload);
       } catch (err) {
         updateComic(img.id, {
           status: 'error',
@@ -322,8 +416,7 @@ export default function AppraisePage() {
       let condition: ConditionResult;
       try {
         condition = await apiPost<ConditionResult>('/api/grade', {
-          imageBase64: img.processedBase64,
-          mimeType: img.mimeType,
+          ...imagePayload,
           identification,
         });
       } catch (err) {
@@ -373,7 +466,7 @@ export default function AppraisePage() {
         adjusted_offer: adj ? applyAdjustmentToOffer(valuation, adj) : undefined,
       });
     },
-    [updateComic],
+    [updateComic, ensureUploaded],
   );
 
   /**
@@ -409,6 +502,7 @@ export default function AppraisePage() {
                 originalName: file.name,
                 thumbnailDataUrl,
                 status: 'pending',
+                // new photo → new upload; the old key is superseded
               }
             : c,
         ),
@@ -428,10 +522,15 @@ export default function AppraisePage() {
     }));
     setComics(initial);
     setPhase('processing');
-    // Never more than PIPELINE_CONCURRENCY books in flight (WO-06).
-    asyncPool(readyImages, PIPELINE_CONCURRENCY, processOne).then(() => {
+    // Upload every photo first (cheap, and a refresh afterwards loses nothing:
+    // each book can re-run from storage), then run the pipeline. Both stages
+    // are bounded by PIPELINE_CONCURRENCY (WO-06).
+    (async () => {
+      const uploaded = await asyncPool(readyImages as PipelineInput[], PIPELINE_CONCURRENCY, ensureUploaded);
+      const inputs = uploaded.map((r, i) => (r.status === 'fulfilled' ? r.value : readyImages[i]));
+      await asyncPool(inputs, PIPELINE_CONCURRENCY, processOne);
       setPhase('done');
-    });
+    })();
   }
 
   /** Re-run one errored book. Needs its image, which lives in upload state;
@@ -440,7 +539,11 @@ export default function AppraisePage() {
     const img = readyImages.find((i) => i.id === id);
     const comic = comics.find((c) => c.id === id);
     if (!comic) return;
-    if (!img) {
+    // A stored photo can be re-run without the bytes in memory.
+    const input: PipelineInput | null = comic.image_key
+      ? { id, originalName: comic.originalName, image_key: comic.image_key }
+      : img ?? null;
+    if (!input) {
       updateComic(id, {
         status: 'image_needed',
         error: comic.error ?? 'Photo no longer available',
@@ -450,11 +553,11 @@ export default function AppraisePage() {
     setComics((prev) =>
       prev.map((c) =>
         c.id === id
-          ? { id, originalName: c.originalName, thumbnailDataUrl: c.thumbnailDataUrl, status: 'pending' }
+          ? { id, originalName: c.originalName, thumbnailDataUrl: c.thumbnailDataUrl, status: 'pending', image_key: c.image_key }
           : c,
       ),
     );
-    void processOne(img);
+    void processOne(input);
   }
 
   // ── Session persistence (WO-06) ──────────────────────────────────────────
@@ -479,7 +582,13 @@ export default function AppraisePage() {
       }
       if (seq !== persistSeq.current) return; // superseded
       storeSavedSession(
-        toSavedSession(snapshotPhase, snapshotComics, snapshotQuestionnaire, thumbsRef.current),
+        toSavedSession(
+          snapshotPhase,
+          snapshotComics,
+          snapshotQuestionnaire,
+          thumbsRef.current,
+          sessionIdRef.current,
+        ),
       );
     })();
   }, [phase, comics, questionnaire]);
@@ -493,6 +602,7 @@ export default function AppraisePage() {
   function handleResume() {
     if (!resumable) return;
     const restored = fromSavedSession(resumable);
+    sessionIdRef.current = restored.sessionId;
     let adj: GradeAdjustment | null = null;
     if (restored.questionnaire) {
       adj = computeGradeAdjustment(restored.questionnaire); // DISPLAY PREVIEW ONLY
@@ -503,15 +613,28 @@ export default function AppraisePage() {
     for (const c of restored.comics) {
       if (c.thumbnailDataUrl) thumbsRef.current.set(c.id, c.thumbnailDataUrl);
     }
+    // Books whose photo is in storage re-run automatically; the rest ask for it.
+    const rerun = restored.comics.filter((c) => c.status === 'image_needed' && c.image_key);
     setComics(
-      restored.comics.map((c) =>
-        adj && c.status === 'complete' && c.valuation
-          ? { ...c, adjusted_offer: applyAdjustmentToOffer(c.valuation, adj) }
-          : c,
-      ),
+      restored.comics.map((c) => {
+        if (adj && c.status === 'complete' && c.valuation) {
+          return { ...c, adjusted_offer: applyAdjustmentToOffer(c.valuation, adj) };
+        }
+        if (c.status === 'image_needed' && c.image_key) {
+          return { ...c, status: 'pending', error: undefined };
+        }
+        return c;
+      }),
     );
     setPhase(restored.phase);
     setResumable(null);
+    if (rerun.length > 0) {
+      void asyncPool(
+        rerun.map((c) => ({ id: c.id, originalName: c.originalName, image_key: c.image_key })),
+        PIPELINE_CONCURRENCY,
+        processOne,
+      );
+    }
   }
 
   function handleDiscardSaved() {
@@ -539,6 +662,7 @@ export default function AppraisePage() {
     clearSavedSession();
     thumbsRef.current = new Map();
     persistSeq.current++;
+    sessionIdRef.current = crypto.randomUUID();
     setPhase('upload');
     setReadyImages([]);
     setComics([]);
@@ -618,8 +742,8 @@ export default function AppraisePage() {
                   {countIdentified(resumable) === 1 ? 'book' : 'books'} identified)
                 </p>
                 <p className="mt-0.5 text-xs text-blue-700">
-                  Saved {new Date(resumable.saved_at).toLocaleString()}. Books photographed
-                  but not yet processed will ask for their photo again.
+                  Saved {new Date(resumable.saved_at).toLocaleString()}. Books whose photos were
+                  stored will finish processing; any others will ask for their photo again.
                 </p>
               </div>
               <div className="flex gap-2">

@@ -43,14 +43,15 @@ const BIG = 'data:image/jpeg;base64,' + 'A'.repeat(50_000);
 
 const live: ComicProcessingState[] = [
   { id: 'a', originalName: 'a.jpg', thumbnailDataUrl: BIG, status: 'complete', identification, condition, valuation, offer, adjusted_offer: offer },
-  { id: 'b', originalName: 'b.jpg', thumbnailDataUrl: BIG, status: 'grading', identification },
+  { id: 'b', originalName: 'b.jpg', thumbnailDataUrl: BIG, status: 'grading', identification, image_key: `uploads/${'6f1d2c3b-4a5e-4f60-8b9c-0d1e2f3a4b5c'}/1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d.jpg` },
   { id: 'c', originalName: 'c.jpg', thumbnailDataUrl: BIG, status: 'error', error: 'Grading failed' },
   { id: 'd', originalName: 'd.jpg', thumbnailDataUrl: BIG, status: 'pending' },
 ];
 const thumbs = new Map([['a', 'data:image/jpeg;base64,small']]);
+const SESSION = '6f1d2c3b-4a5e-4f60-8b9c-0d1e2f3a4b5c';
 
 describe('toSavedSession', () => {
-  const saved = toSavedSession('processing', live, null, thumbs, new Date('2026-09-18T12:00:00Z'));
+  const saved = toSavedSession('processing', live, null, thumbs, SESSION, new Date('2026-09-18T12:00:00Z'));
 
   it('keeps complete results and converts everything else to image_needed', () => {
     expect(saved.comics.map((c) => c.status)).toEqual(['complete', 'image_needed', 'image_needed', 'image_needed']);
@@ -76,14 +77,17 @@ describe('toSavedSession', () => {
 
 describe('fromSavedSession', () => {
   it('resumes a mid-processing session at done and restores usable results', () => {
-    const saved = toSavedSession('processing', live, null, thumbs);
+    const saved = toSavedSession('processing', live, null, thumbs, SESSION);
     const restored = fromSavedSession(saved);
     expect(restored.phase).toBe('done');
     expect(restored.comics[0].status).toBe('complete');
     expect(restored.comics[0].offer).toEqual(offer);
     expect(restored.comics[0].adjusted_offer).toBeUndefined();
     expect(restored.comics[1].status).toBe('image_needed');
+    expect(restored.comics[1].image_key).toMatch(/^uploads\//); // re-runnable from storage
+    expect(restored.comics[2].image_key).toBeUndefined();
     expect(restored.comics[2].error).toBe('Grading failed');
+    expect(restored.sessionId).toBe(SESSION);
     expect(countIdentified(saved)).toBe(1);
   });
 
@@ -94,7 +98,7 @@ describe('fromSavedSession', () => {
       storage_location: 'unknown' as const, known_restorations: false, timeline: 'urgent' as const,
       pickup_available: false,
     };
-    const restored = fromSavedSession(toSavedSession('offer', [live[0]], q, thumbs));
+    const restored = fromSavedSession(toSavedSession('offer', [live[0]], q, thumbs, SESSION));
     expect(restored.phase).toBe('offer');
     expect(restored.questionnaire).toEqual(q);
   });
@@ -103,8 +107,8 @@ describe('fromSavedSession', () => {
 describe('SavedSessionSchema', () => {
   it('rejects tampered or foreign payloads', () => {
     expect(SavedSessionSchema.safeParse({ version: 2 }).success).toBe(false);
-    expect(SavedSessionSchema.safeParse({ version: 1, saved_at: 'x', phase: 'submitted', comics: [], questionnaire: null }).success).toBe(false);
-    const saved = toSavedSession('done', [live[0]], null, thumbs);
+    expect(SavedSessionSchema.safeParse({ version: 1, saved_at: 'x', session_id: SESSION, phase: 'submitted', comics: [], questionnaire: null }).success).toBe(false);
+    const saved = toSavedSession('done', [live[0]], null, thumbs, SESSION);
     const tampered = JSON.parse(JSON.stringify(saved));
     tampered.comics[0].valuation.fmv_low = 'lots';
     expect(SavedSessionSchema.safeParse(tampered).success).toBe(false);

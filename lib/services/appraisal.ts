@@ -31,6 +31,7 @@ import {
   type GradeAdjustment,
 } from '@/lib/services/grade-adjustment';
 import type { ReportBook } from '@/lib/types/report';
+import { IMAGE_KEY_REGEX } from '@/lib/services/r2';
 
 // ---------------------------------------------------------------------------
 // Input contract
@@ -60,6 +61,8 @@ export const ConsistentValuationSchema = ValuationResultSchema.superRefine((v, c
 
 /** Per-book input: pipeline outputs only. No offer fields are accepted. */
 export const AppraisalBookInputSchema = z.object({
+  /** R2 key from /api/upload; format-checked, optional (absent when storage is off) */
+  image_key: z.string().regex(IMAGE_KEY_REGEX, 'Invalid image key').nullable().optional(),
   identification: IdentificationResultSchema,
   condition: ConditionResultSchema,
   valuation: ConsistentValuationSchema,
@@ -89,7 +92,8 @@ export interface ComputedAppraisal {
  */
 export function computeAppraisal(input: AppraisalInput): ComputedAppraisal {
   const adjustment = computeGradeAdjustment(input.seller);
-  const books: ReportBook[] = input.books.map(({ identification, condition, valuation }) => ({
+  const books: ReportBook[] = input.books.map(({ image_key, identification, condition, valuation }) => ({
+    image_key: image_key ?? null,
     identification,
     condition,
     valuation,

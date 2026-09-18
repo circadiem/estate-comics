@@ -10,6 +10,8 @@ import type { SellerQuestionnaire } from '@/lib/schemas/questionnaire';
 import type { GradeAdjustment } from '@/lib/services/grade-adjustment';
 
 export interface ReportBook {
+  /** R2 key of the processed cover photo, when it was stored (Stage 2). */
+  image_key?: string | null;
   identification: IdentificationResult;
   condition: ConditionResult;
   valuation: ValuationResult;

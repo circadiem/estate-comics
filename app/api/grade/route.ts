@@ -1,19 +1,18 @@
-// Task 5 — Condition assessment endpoint
+// Condition assessment endpoint
 // POST /api/grade
-// Body: { imageBase64: string; mimeType: ImageMediaType; identification: IdentificationResult }
+// Body: ({ image_key } or { imageBase64, mimeType }) + { identification }
 // Returns: ConditionResult (validated Zod schema)
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { assessCondition, ClaudeApiError, ClaudeValidationError } from '@/lib/services/claude';
-import type { ImageMediaType } from '@/lib/services/claude';
 import { IdentificationResultSchema } from '@/lib/schemas/identification';
+import { ImageInputSchema, ImageSourceError, resolveImageInput } from '@/lib/services/image-source';
 
-const RequestSchema = z.object({
-  imageBase64: z.string().min(1, 'imageBase64 is required'),
-  mimeType: z.enum(['image/jpeg', 'image/png', 'image/gif', 'image/webp']),
-  identification: IdentificationResultSchema,
-});
+const RequestSchema = z.intersection(
+  ImageInputSchema,
+  z.object({ identification: IdentificationResultSchema }),
+);
 
 export async function POST(request: NextRequest) {
   let body: unknown;
@@ -31,10 +30,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { imageBase64, mimeType, identification } = parsed.data;
+  const { identification } = parsed.data;
+  let image: Awaited<ReturnType<typeof resolveImageInput>>;
+  try {
+    image = await resolveImageInput(parsed.data);
+  } catch (err) {
+    if (err instanceof ImageSourceError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    throw err;
+  }
 
   try {
-    const result = await assessCondition(imageBase64, identification, mimeType as ImageMediaType);
+    const result = await assessCondition(image.imageBase64, identification, image.mimeType);
     return NextResponse.json(result);
   } catch (err) {
     if (err instanceof ClaudeValidationError) {

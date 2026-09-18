@@ -1,17 +1,13 @@
-// Task 5 — Comic identification endpoint
+// Comic identification endpoint
 // POST /api/identify
-// Body: { imageBase64: string; mimeType: ImageMediaType }
+// Body: { image_key } (uploaded via /api/upload) or { imageBase64, mimeType }
 // Returns: IdentificationResult (validated Zod schema)
 
 import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
 import { identifyComic, ClaudeApiError, ClaudeValidationError } from '@/lib/services/claude';
-import type { ImageMediaType } from '@/lib/services/claude';
+import { ImageInputSchema, ImageSourceError, resolveImageInput } from '@/lib/services/image-source';
 
-const RequestSchema = z.object({
-  imageBase64: z.string().min(1, 'imageBase64 is required'),
-  mimeType: z.enum(['image/jpeg', 'image/png', 'image/gif', 'image/webp']),
-});
+const RequestSchema = ImageInputSchema;
 
 export async function POST(request: NextRequest) {
   let body: unknown;
@@ -29,10 +25,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { imageBase64, mimeType } = parsed.data;
+  let image: Awaited<ReturnType<typeof resolveImageInput>>;
+  try {
+    image = await resolveImageInput(parsed.data);
+  } catch (err) {
+    if (err instanceof ImageSourceError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    throw err;
+  }
 
   try {
-    const result = await identifyComic(imageBase64, mimeType as ImageMediaType);
+    const result = await identifyComic(image.imageBase64, image.mimeType);
     return NextResponse.json(result);
   } catch (err) {
     if (err instanceof ClaudeValidationError) {

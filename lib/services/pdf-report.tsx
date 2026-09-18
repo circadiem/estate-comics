@@ -13,13 +13,14 @@
 //   4. How this appraisal was prepared — methodology + terms
 // Footer on every page: Estate Comics · Powered by Legends of Superheros · Est. 1993
 //
-// Cover thumbnails resolve ONLY through resolveCoverImage() (report-images.ts).
+// Cover thumbnails resolve ONLY through report-images.ts: resolved once in
+// generatePDF() and threaded to CoverThumb via `images`.
 
 import React from 'react';
 import { Document, Page, View, Text, Image, StyleSheet, pdf } from '@react-pdf/renderer';
 import type { ReportData, ReportBook } from '@/lib/types/report';
 import { selectHiddenGems, isHeldForReview } from '@/lib/services/offer';
-import { resolveCoverImage } from '@/lib/services/report-images';
+import { resolveCoverImages, coverImageFor, type CoverImageMap } from '@/lib/services/report-images';
 import { OFFER_VALIDITY_DAYS } from '@/lib/config/constants';
 import { color, font, size, space, radius, refTracking } from '@/lib/pdf/theme';
 
@@ -243,8 +244,8 @@ function plainSignificance(book: ReportBook): string | null {
 /** The ONLY place a cover thumbnail is drawn. Source comes from the accessor.
  *  Renders nothing when there is no image — no empty frame — so the text runs
  *  full width until R2 supplies covers. */
-function CoverThumb({ book }: { book: ReportBook }) {
-  const src = resolveCoverImage(book);
+function CoverThumb({ book, images }: { book: ReportBook; images: CoverImageMap }) {
+  const src = coverImageFor(book, images);
   if (!src) return null;
   return (
     <View style={s.thumb}>
@@ -443,12 +444,20 @@ function OpeningPage({ data }: { data: ReportData }) {
 // 2. Key Issues — same basis as summary.key_issues_count (adjusted tier)
 // ---------------------------------------------------------------------------
 
-function BookEntry({ book, sentence }: { book: ReportBook; sentence: string | null }) {
+function BookEntry({
+  book,
+  sentence,
+  images,
+}: {
+  book: ReportBook;
+  sentence: string | null;
+  images: CoverImageMap;
+}) {
   const { identification: id, condition: c, valuation: v, adjusted_offer: o } = book;
   const held = isHeldForReview(book);
   return (
     <View style={s.bookRow} wrap={false}>
-      <CoverThumb book={book} />
+      <CoverThumb book={book} images={images} />
       <View style={s.bookBody}>
         <Text style={s.bookTitle}>
           {id.title} #{id.issue_number}
@@ -480,7 +489,7 @@ function BookEntry({ book, sentence }: { book: ReportBook; sentence: string | nu
   );
 }
 
-function KeyIssuesSection({ data }: { data: ReportData }) {
+function KeyIssuesSection({ data, images }: { data: ReportData; images: CoverImageMap }) {
   const keys = data.books.filter((b) => b.adjusted_offer.tier === 'key_issues').sort(byFmvDesc);
   if (keys.length === 0) return null;
   return (
@@ -490,7 +499,7 @@ function KeyIssuesSection({ data }: { data: ReportData }) {
         subhead="The most valuable books in the collection, first."
       />
       {keys.map((book, i) => (
-        <BookEntry key={i} book={book} sentence={plainSignificance(book)} />
+        <BookEntry key={i} book={book} sentence={plainSignificance(book)} images={images} />
       ))}
     </View>
   );
@@ -500,7 +509,7 @@ function KeyIssuesSection({ data }: { data: ReportData }) {
 // 3. Hidden Gems — capped selection shared with every other surface
 // ---------------------------------------------------------------------------
 
-function HiddenGemsSection({ data, first }: { data: ReportData; first: boolean }) {
+function HiddenGemsSection({ data, first, images }: { data: ReportData; first: boolean; images: CoverImageMap }) {
   const gems = selectHiddenGems(data.books);
   if (gems.length === 0) return null;
   return (
@@ -511,7 +520,7 @@ function HiddenGemsSection({ data, first }: { data: ReportData; first: boolean }
       />
       <View style={[s.panel, { marginTop: 0, paddingTop: 2, paddingBottom: 2 }]}>
         {gems.map((book, i) => (
-          <BookEntry key={i} book={book} sentence={book.valuation.hidden_gem_explanation} />
+          <BookEntry key={i} book={book} sentence={book.valuation.hidden_gem_explanation} images={images} />
         ))}
       </View>
     </View>
@@ -519,14 +528,14 @@ function HiddenGemsSection({ data, first }: { data: ReportData; first: boolean }
 }
 
 /** Key Issues then Hidden Gems, flowing across as many pages as they need. */
-function HighlightsPages({ data }: { data: ReportData }) {
+function HighlightsPages({ data, images }: { data: ReportData; images: CoverImageMap }) {
   const hasKeys = data.books.some((b) => b.adjusted_offer.tier === 'key_issues');
   const hasGems = selectHiddenGems(data.books).length > 0;
   if (!hasKeys && !hasGems) return null;
   return (
     <InnerPage data={data}>
-      <KeyIssuesSection data={data} />
-      <HiddenGemsSection data={data} first={!hasKeys} />
+      <KeyIssuesSection data={data} images={images} />
+      <HiddenGemsSection data={data} first={!hasKeys} images={images} />
     </InnerPage>
   );
 }
@@ -537,11 +546,11 @@ function HighlightsPages({ data }: { data: ReportData }) {
 
 const COL = { thumb: 34, title: 176, era: 44, grade: 70, fmv: 78, offer: 78, flags: 36 } as const;
 
-function InventoryPage({ data }: { data: ReportData }) {
+function InventoryPage({ data, images }: { data: ReportData; images: CoverImageMap }) {
   const gems = new Set<ReportBook>(selectHiddenGems(data.books));
   const listed = data.books.filter((b) => !b.adjusted_offer.is_bulk).sort(byFmvDesc);
-  // Same accessor as everywhere else: the column exists only if a cover exists.
-  const hasImages = listed.some((b) => resolveCoverImage(b) !== null);
+  // Same source as everywhere else: the column exists only if a cover exists.
+  const hasImages = listed.some((b) => coverImageFor(b, images) !== null);
   const thumbW = hasImages ? COL.thumb : 0;
   const titleW = COL.title + (hasImages ? 0 : COL.thumb);
   const anyHeld = listed.some(isHeldForReview);
@@ -577,7 +586,7 @@ function InventoryPage({ data }: { data: ReportData }) {
           <View key={i} style={[s.tr, i % 2 === 0 ? s.trBase : s.trAlt]} wrap={false}>
             {hasImages && (
               <View style={{ width: thumbW }}>
-                <CoverThumb book={book} />
+                <CoverThumb book={book} images={images} />
               </View>
             )}
             <View style={{ width: titleW, paddingRight: 6 }}>
@@ -705,7 +714,7 @@ function MethodologyPage({ data }: { data: ReportData }) {
 // Root document
 // ---------------------------------------------------------------------------
 
-function AppraisalDocument({ data }: { data: ReportData }) {
+function AppraisalDocument({ data, images }: { data: ReportData; images: CoverImageMap }) {
   return (
     <Document
       title={`Estate Comics Appraisal Report ${data.reference_number}`}
@@ -715,8 +724,8 @@ function AppraisalDocument({ data }: { data: ReportData }) {
       producer="Estate Comics"
     >
       <OpeningPage data={data} />
-      <HighlightsPages data={data} />
-      <InventoryPage data={data} />
+      <HighlightsPages data={data} images={images} />
+      <InventoryPage data={data} images={images} />
       <MethodologyPage data={data} />
     </Document>
   );
@@ -738,7 +747,9 @@ function collectStream(stream: NodeJS.ReadableStream): Promise<Buffer> {
 }
 
 export async function generatePDF(data: ReportData): Promise<Buffer> {
-  const instance = pdf(<AppraisalDocument data={data} />);
+  // One batch fetch of cover thumbnails; the render itself does no I/O.
+  const images = await resolveCoverImages(data.books);
+  const instance = pdf(<AppraisalDocument data={data} images={images} />);
   const stream = await instance.toBuffer();
   return collectStream(stream);
 }

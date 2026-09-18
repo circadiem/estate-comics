@@ -67,6 +67,7 @@ export function generateCSV(data: ReportData): string {
     'Adjusted Tier': book.adjusted_offer.tier_label,
     // Held books are valued provisionally and excluded from the headline range
     'Offer Status': isHeldForReview(book) ? 'Pending verification' : 'Offered',
+    'Image Key': book.image_key ?? '',
 
     // Storage adjustment
     'FMV Multiplier': data.adjustment.fmv_multiplier.toFixed(3),

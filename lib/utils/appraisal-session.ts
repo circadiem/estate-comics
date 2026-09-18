@@ -35,6 +35,8 @@ const SavedComicSchema = z.object({
   /** Small JPEG data URL, or '' when unavailable */
   thumbnailDataUrl: z.string(),
   status: z.enum(['complete', 'image_needed']),
+  /** R2 key when the photo was stored — lets a book re-run without the photo */
+  image_key: z.string().optional(),
   identification: IdentificationResultSchema.optional(),
   condition: ConditionResultSchema.optional(),
   valuation: ValuationResultSchema.optional(),
@@ -45,6 +47,8 @@ const SavedComicSchema = z.object({
 export const SavedSessionSchema = z.object({
   version: z.literal(1),
   saved_at: z.string(),
+  /** Upload session id — the R2 key prefix for this appraisal */
+  session_id: z.string().uuid(),
   phase: ResumablePhaseSchema,
   comics: z.array(SavedComicSchema).min(1),
   questionnaire: SellerQuestionnaireSchema.nullable(),
@@ -69,11 +73,13 @@ export function toSavedSession(
   comics: ComicProcessingState[],
   questionnaire: SavedSession['questionnaire'],
   thumbnails: ReadonlyMap<string, string>,
+  sessionId: string,
   now: Date = new Date(),
 ): SavedSession {
   return {
     version: 1,
     saved_at: now.toISOString(),
+    session_id: sessionId,
     phase,
     questionnaire,
     comics: comics.map((c) => {
@@ -83,6 +89,7 @@ export function toSavedSession(
         originalName: c.originalName,
         thumbnailDataUrl: thumbnails.get(c.id) ?? '',
         status: complete ? 'complete' : 'image_needed',
+        image_key: c.image_key,
         identification: complete ? c.identification : undefined,
         condition: complete ? c.condition : undefined,
         valuation: complete ? c.valuation : undefined,
@@ -100,17 +107,20 @@ export function toSavedSession(
  */
 export function fromSavedSession(saved: SavedSession): {
   phase: ResumablePhase;
+  sessionId: string;
   comics: ComicProcessingState[];
   questionnaire: SavedSession['questionnaire'];
 } {
   return {
     phase: saved.phase === 'processing' ? 'done' : saved.phase,
+    sessionId: saved.session_id,
     questionnaire: saved.questionnaire,
     comics: saved.comics.map((c) => ({
       id: c.id,
       originalName: c.originalName,
       thumbnailDataUrl: c.thumbnailDataUrl,
       status: c.status,
+      image_key: c.image_key,
       identification: c.identification,
       condition: c.condition,
       valuation: c.valuation,

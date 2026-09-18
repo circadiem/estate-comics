@@ -27,6 +27,9 @@ export interface ComicProcessingState {
   originalName: string;
   thumbnailDataUrl: string;
   status: ProcessingStatus;
+  /** R2 object key once the photo has been uploaded (Stage 2). A book with a
+   *  key can be re-run from storage without the photo being in memory. */
+  image_key?: string;
   identification?: IdentificationResult;
   condition?: ConditionResult;
   valuation?: ValuationResult;
