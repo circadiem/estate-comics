@@ -2,7 +2,9 @@
 //
 // @react-pdf/renderer cannot use next/font or CSS; it needs TrueType files.
 // The two brand families are bundled under lib/pdf/fonts/ (SIL Open Font
-// License, texts alongside) and registered once per process. If a file is
+// License, texts alongside) and registered once per process. The display face
+// is "Provenance Serif": Cormorant Garamond with lining figures made the
+// default and renamed per the OFL's reserved-name clause — see README.md there. If a file is
 // missing — a broken deploy, a trimmed bundle — we fall back to the built-in
 // PDF fonts and log once, so an appraisal is never blocked by typography.
 //
@@ -15,15 +17,15 @@ import { Font } from '@react-pdf/renderer';
 
 const FONT_DIR = path.join(process.cwd(), 'lib', 'pdf', 'fonts');
 
-const DISPLAY_FAMILY = 'Cormorant Garamond';
+const DISPLAY_FAMILY = 'Provenance Serif';
 const BODY_FAMILY = 'Nunito Sans';
 
 const DISPLAY_FILES = [
-  { file: 'CormorantGaramond-Regular.ttf', fontWeight: 400, fontStyle: 'normal' as const },
-  { file: 'CormorantGaramond-Medium.ttf', fontWeight: 500, fontStyle: 'normal' as const },
-  { file: 'CormorantGaramond-SemiBold.ttf', fontWeight: 600, fontStyle: 'normal' as const },
-  { file: 'CormorantGaramond-Bold.ttf', fontWeight: 700, fontStyle: 'normal' as const },
-  { file: 'CormorantGaramond-Italic.ttf', fontWeight: 400, fontStyle: 'italic' as const },
+  { file: 'ProvenanceSerif-Regular.ttf', fontWeight: 400, fontStyle: 'normal' as const },
+  { file: 'ProvenanceSerif-Medium.ttf', fontWeight: 500, fontStyle: 'normal' as const },
+  { file: 'ProvenanceSerif-SemiBold.ttf', fontWeight: 600, fontStyle: 'normal' as const },
+  { file: 'ProvenanceSerif-Bold.ttf', fontWeight: 700, fontStyle: 'normal' as const },
+  { file: 'ProvenanceSerif-Italic.ttf', fontWeight: 400, fontStyle: 'italic' as const },
 ];
 
 const BODY_FILES = [
@@ -34,7 +36,7 @@ const BODY_FILES = [
 ];
 
 export interface PdfFontFamilies {
-  /** Cormorant Garamond, or the built-in serif if the files are unavailable */
+  /** Provenance Serif (Cormorant Garamond, lining figures), or the built-in serif */
   display: string;
   /** Nunito Sans, or the built-in sans if the files are unavailable */
   body: string;

@@ -26,7 +26,7 @@ export const size = {
   h2: px(30),
   h3: px(23),
   subhead: px(19),
-  figure: px(30), // summary-card figures — "where the serif earns its place"
+  figure: px(24), // summary-card figures; 24px keeps a full range on one line
   wordmark: px(27),
   wordmarkSmall: px(16),
   descriptor: px(13),

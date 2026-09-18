@@ -4,7 +4,7 @@
 // Source: Implementation Spec §VII.A–C
 
 import { OFFER_TIERS } from '@/lib/config/offer-tiers';
-import { MAX_HIDDEN_GEMS } from '@/lib/config/constants';
+import { MAX_HIDDEN_GEMS, LOW_CONFIDENCE_THRESHOLD } from '@/lib/config/constants';
 import { OfferResultSchema, CollectionSummarySchema } from '@/lib/schemas/offer';
 import type { OfferResult, CollectionSummary } from '@/lib/schemas/offer';
 import type { IdentificationResult } from '@/lib/schemas/identification';
@@ -71,6 +71,27 @@ export function calculateBookOffer(
 }
 
 // ---------------------------------------------------------------------------
+// Held for review
+// ---------------------------------------------------------------------------
+
+/**
+ * A book we do not trust enough to offer on: the model flagged it, or its
+ * identification confidence is below LOW_CONFIDENCE_THRESHOLD. Held books are
+ * still listed, graded and valued provisionally, but their figures are kept
+ * OUT of the headline offer and FMV ranges and stated separately as pending
+ * verification, on every surface. Hard rule 5: never offer on a
+ * low-confidence identification.
+ */
+export function isHeldForReview(book: {
+  identification: Pick<IdentificationResult, 'flagged_for_review' | 'confidence_score'>;
+}): boolean {
+  return (
+    book.identification.flagged_for_review ||
+    book.identification.confidence_score < LOW_CONFIDENCE_THRESHOLD
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Hidden gems — collection-level cap
 // ---------------------------------------------------------------------------
 
@@ -125,8 +146,11 @@ export interface CollectionBook {
  * unadjusted market valuation, which is what "fair market value" means on the
  * report; the adjustment applies to the offer, not to the market.
  *
- * Flagged books (identification.flagged_for_review) are counted but still
- * included in totals — the operator reviews them separately.
+ * Books held for review (isHeldForReview) are counted in
+ * `total_books_identified` and `total_books_flagged`, and their tier still
+ * counts toward `key_issues_count` / `bulk_lot_count` (classification, not
+ * money), but their FMV and provisional offer go to the `pending_*` fields —
+ * never into the headline `total_fmv_*` / `total_offer_*` ranges.
  */
 export function buildCollectionSummary(
   books: CollectionBook[],
@@ -139,20 +163,32 @@ export function buildCollectionSummary(
   let total_fmv_high = 0;
   let total_offer_low = 0;
   let total_offer_high = 0;
+  let pending_fmv_low = 0;
+  let pending_fmv_high = 0;
+  let pending_offer_low = 0;
+  let pending_offer_high = 0;
   let key_issues_count = 0;
   const hidden_gems_count = selectHiddenGems(books).length;
   let bulk_lot_count = 0;
   let total_books_flagged = 0;
 
-  for (const { identification, valuation, adjusted_offer } of books) {
-    total_fmv_low += valuation.fmv_low;
-    total_fmv_high += valuation.fmv_high;
-    total_offer_low += adjusted_offer.offer_low;
-    total_offer_high += adjusted_offer.offer_high;
+  for (const book of books) {
+    const { identification, valuation, adjusted_offer } = book;
+    if (isHeldForReview(book)) {
+      total_books_flagged++;
+      pending_fmv_low += valuation.fmv_low;
+      pending_fmv_high += valuation.fmv_high;
+      pending_offer_low += adjusted_offer.offer_low;
+      pending_offer_high += adjusted_offer.offer_high;
+    } else {
+      total_fmv_low += valuation.fmv_low;
+      total_fmv_high += valuation.fmv_high;
+      total_offer_low += adjusted_offer.offer_low;
+      total_offer_high += adjusted_offer.offer_high;
+    }
 
     if (adjusted_offer.tier === 'key_issues') key_issues_count++;
     if (adjusted_offer.is_bulk) bulk_lot_count++;
-    if (identification.flagged_for_review) total_books_flagged++;
 
     // Era breakdown
     const eraKey = identification.era.toLowerCase() as keyof typeof eraCounts;
@@ -170,6 +206,10 @@ export function buildCollectionSummary(
     total_fmv_high: Math.round(total_fmv_high * 100) / 100,
     total_offer_low: Math.round(total_offer_low * 100) / 100,
     total_offer_high: Math.round(total_offer_high * 100) / 100,
+    pending_fmv_low: Math.round(pending_fmv_low * 100) / 100,
+    pending_fmv_high: Math.round(pending_fmv_high * 100) / 100,
+    pending_offer_low: Math.round(pending_offer_low * 100) / 100,
+    pending_offer_high: Math.round(pending_offer_high * 100) / 100,
     key_issues_count,
     hidden_gems_count,
     bulk_lot_count,

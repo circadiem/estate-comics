@@ -37,6 +37,7 @@ import {
 } from '@/lib/services/grade-adjustment';
 import type { GradeAdjustment } from '@/lib/services/grade-adjustment';
 import { OFFER_VALIDITY_DAYS, PIPELINE_CONCURRENCY } from '@/lib/config/constants';
+import { isHeldForReview } from '@/lib/services/offer';
 import { validateAndProcessImage } from '@/lib/utils/image-validation';
 import { asyncPool } from '@/lib/utils/async-pool';
 import {
@@ -101,9 +102,18 @@ function AdjustedOfferSummary({
   submitState: 'idle' | 'submitting' | 'error';
   submitError: string | null;
 }) {
+  // DISPLAY PREVIEW ONLY — mirrors the server rule: books held for review are
+  // excluded from the headline range and stated separately.
   const completed = comics.filter(
-    (c) => c.status === 'complete' && c.adjusted_offer,
+    (c) =>
+      c.status === 'complete' &&
+      c.adjusted_offer &&
+      c.identification &&
+      !isHeldForReview({ identification: c.identification }),
   );
+  const heldCount = comics.filter(
+    (c) => c.status === 'complete' && c.identification && isHeldForReview({ identification: c.identification }),
+  ).length;
   const totalOfferLow = completed.reduce(
     (sum, c) => sum + (c.adjusted_offer?.offer_low ?? 0),
     0,
@@ -127,6 +137,8 @@ function AdjustedOfferSummary({
         <p className="mt-1 text-xs text-green-600">
           Based on {completed.length} identified book
           {completed.length !== 1 ? 's' : ''}
+          {heldCount > 0 &&
+            ` · ${heldCount} held for review, not included until verified`}
           {errored > 0 && ` · ${errored} could not be processed`}
         </p>
       </div>

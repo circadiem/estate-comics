@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderSellerConfirmationHtml, renderInternalNotificationHtml } from '@/lib/services/email';
 import { provenance } from '@/design/tailwind.tokens';
-import { sampleReport } from './pdf-report.test';
+import { sampleReport } from './fixtures/sample-report';
 
 const TOKEN_HEX = new Set(Object.values(provenance.colors).map((h) => h.toLowerCase()));
 
@@ -41,6 +41,15 @@ describe('transactional emails — Provenance', () => {
       expect(html).not.toMatch(/same-day/i);
       expect(html).not.toMatch(/USDC|BTC/);
     }
+  });
+
+  it('states held books as pending verification, outside the headline', () => {
+    // sampleReport() flags Hulk #181
+    expect(data.summary.total_books_flagged).toBeGreaterThan(0);
+    expect(seller).toMatch(/held for review/);
+    expect(seller).toContain('not included in this range');
+    expect(internal).toContain('Pending verification');
+    expect(internal).toContain('excluded from the headline');
   });
 
   it('seller email headline equals the summary offer range', () => {

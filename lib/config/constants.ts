@@ -6,6 +6,11 @@ export const CLAUDE_MODEL = 'claude-sonnet-4-5-20250929';
 // Minimum collection size — enforced at qualification step
 export const MIN_COLLECTION_SIZE = 100;
 
+// Identification confidence below which a book is HELD FOR REVIEW: it is
+// listed, but no offer is made on it and it is excluded from the headline
+// range until a person verifies the identification (hard rule 5).
+export const LOW_CONFIDENCE_THRESHOLD = 70;
+
 // Hidden gems thresholds
 export const HIDDEN_GEM_FMV_THRESHOLD = 50; // FMV midpoint must exceed $50
 export const MAX_HIDDEN_GEMS = 10; // Maximum highlighted per collection

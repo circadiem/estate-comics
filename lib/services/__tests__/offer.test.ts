@@ -13,6 +13,7 @@ import {
   buildCollectionSummary,
   calculateBookOffer,
   selectHiddenGems,
+  isHeldForReview,
 } from '@/lib/services/offer';
 import { MAX_HIDDEN_GEMS } from '@/lib/config/constants';
 import type { CollectionBook } from '@/lib/services/offer';
@@ -269,5 +270,50 @@ describe('selectHiddenGems — MAX_HIDDEN_GEMS cap (WO-03)', () => {
     ];
     expect(selectHiddenGems(tied).map((b) => b.identification.issue_number)).toEqual(['a', 'b', 'c']);
     expect(selectHiddenGems([])).toEqual([]);
+  });
+});
+
+describe('held for review — excluded from the headline range (hard rule 5)', () => {
+  const q085: SellerQuestionnaire = { ...questionnaireBase, storage_location: 'garage_basement' };
+  const trusted = book(1000, 1400, q085, { issue_number: 'trusted' });
+  const flagged = book(1800, 2600, q085, { issue_number: 'flagged', flagged_for_review: true });
+  const lowConf = book(300, 500, q085, { issue_number: 'lowconf', confidence_score: 55 });
+  const summary = buildCollectionSummary([trusted, flagged, lowConf], 'EC-20260918-HELD');
+
+  it('identifies held books by flag or by low confidence', () => {
+    expect(isHeldForReview(trusted)).toBe(false);
+    expect(isHeldForReview(flagged)).toBe(true);
+    expect(isHeldForReview(lowConf)).toBe(true);
+  });
+
+  it('keeps held books out of the headline offer and FMV ranges', () => {
+    expect(summary.total_offer_low).toBe(trusted.adjusted_offer.offer_low);
+    expect(summary.total_offer_high).toBe(trusted.adjusted_offer.offer_high);
+    expect(summary.total_fmv_low).toBe(trusted.valuation.fmv_low);
+    expect(summary.total_fmv_high).toBe(trusted.valuation.fmv_high);
+  });
+
+  it('states the held books separately as pending verification', () => {
+    expect(summary.total_books_flagged).toBe(2);
+    expect(summary.pending_offer_low).toBe(round2(flagged.adjusted_offer.offer_low + lowConf.adjusted_offer.offer_low));
+    expect(summary.pending_offer_high).toBe(round2(flagged.adjusted_offer.offer_high + lowConf.adjusted_offer.offer_high));
+    expect(summary.pending_fmv_low).toBe(flagged.valuation.fmv_low + lowConf.valuation.fmv_low);
+    expect(summary.pending_fmv_high).toBe(flagged.valuation.fmv_high + lowConf.valuation.fmv_high);
+    // headline + pending == what the old, wrong headline would have been
+    expect(round2(summary.total_offer_low + summary.pending_offer_low)).toBe(
+      sum([trusted, flagged, lowConf], (b) => b.adjusted_offer.offer_low),
+    );
+  });
+
+  it('still counts a held key issue as a key issue (classification, not money)', () => {
+    expect(summary.key_issues_count).toBe(2);
+    expect(summary.total_books_identified).toBe(3);
+  });
+
+  it('a collection where every book is held has a zero headline', () => {
+    const s = buildCollectionSummary([flagged, lowConf], 'EC-20260918-0000');
+    expect(s.total_offer_low).toBe(0);
+    expect(s.total_offer_high).toBe(0);
+    expect(s.pending_offer_high).toBeGreaterThan(0);
   });
 });

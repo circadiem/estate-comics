@@ -18,7 +18,7 @@
 import React from 'react';
 import { Document, Page, View, Text, Image, StyleSheet, pdf } from '@react-pdf/renderer';
 import type { ReportData, ReportBook } from '@/lib/types/report';
-import { selectHiddenGems } from '@/lib/services/offer';
+import { selectHiddenGems, isHeldForReview } from '@/lib/services/offer';
 import { resolveCoverImage } from '@/lib/services/report-images';
 import { OFFER_VALIDITY_DAYS } from '@/lib/config/constants';
 import { color, font, size, space, radius, refTracking } from '@/lib/pdf/theme';
@@ -112,8 +112,9 @@ const s = StyleSheet.create({
     paddingHorizontal: space.gap,
   },
   cardLabel: { fontSize: size.label, color: color.umber, marginBottom: 2, lineHeight: 1.45 },
-  cardFigure: { fontFamily: font.display, fontWeight: 600, fontSize: size.figure, lineHeight: 1.1, color: color.darkUmber },
-  cardFigureSm: { fontFamily: font.display, fontWeight: 600, fontSize: size.h3, lineHeight: 1.15, color: color.darkUmber },
+  cardFigure: { fontFamily: font.display, fontWeight: 600, fontSize: size.figure, lineHeight: 1.15, color: color.darkUmber },
+  cardWide: { flex: 1.45 },
+  cardNarrow: { flex: 0.8 },
   cardSub: { fontSize: size.micro, color: color.umber, marginTop: 2, lineHeight: 1.45 },
 
   // Panels
@@ -153,8 +154,6 @@ const s = StyleSheet.create({
   // Cover thumbnail
   thumb: { width: 30, height: 45, borderRadius: radius, borderWidth: 1, borderColor: color.bisque, backgroundColor: color.vellum },
   thumbImg: { width: 30, height: 45, borderRadius: radius, objectFit: 'cover' },
-  thumbPlaceholder: { width: 30, height: 45, alignItems: 'center', justifyContent: 'center' },
-  thumbPlaceholderText: { fontSize: 5.5, color: color.patina, textAlign: 'center', lineHeight: 1.45 },
 
   // Inventory table
   th: {
@@ -175,9 +174,9 @@ const s = StyleSheet.create({
   tdNumStrong: { fontSize: size.label, fontWeight: 600, color: color.darkUmber, textAlign: 'right', lineHeight: 1.45 },
 
   // Prose
-  p: { fontSize: size.sm, lineHeight: 1.6, color: color.charcoalBrown, marginBottom: space.tight, maxWidth: 440 },
+  p: { fontSize: size.sm, lineHeight: 1.55, color: color.charcoalBrown, marginBottom: space.tight, maxWidth: 500 },
   termTitle: { fontWeight: 600, fontSize: size.sm, color: color.darkUmber, marginTop: space.tight, marginBottom: 2, lineHeight: 1.45 },
-  termBody: { fontSize: size.label, lineHeight: 1.55, color: color.charcoalBrown, maxWidth: 460 },
+  termBody: { fontSize: size.label, lineHeight: 1.5, color: color.charcoalBrown, maxWidth: 500 },
 
   // Footer
   footer: {
@@ -193,6 +192,9 @@ const s = StyleSheet.create({
     paddingTop: 6,
   },
   footerText: { fontSize: size.micro, color: color.patina },
+  // Closing line, last page only. Lives in the fixed footer so it can never
+  // force a page break. No lineHeight here (see the note on `page`).
+  footerTagline: { fontFamily: font.display, fontStyle: 'italic', fontSize: size.sm, color: color.patina, textAlign: 'center', flex: 1 },
 });
 
 // ---------------------------------------------------------------------------
@@ -238,19 +240,16 @@ function plainSignificance(book: ReportBook): string | null {
 // Shared pieces
 // ---------------------------------------------------------------------------
 
-/** The ONLY place a cover thumbnail is drawn. Source comes from the accessor. */
+/** The ONLY place a cover thumbnail is drawn. Source comes from the accessor.
+ *  Renders nothing when there is no image — no empty frame — so the text runs
+ *  full width until R2 supplies covers. */
 function CoverThumb({ book }: { book: ReportBook }) {
   const src = resolveCoverImage(book);
+  if (!src) return null;
   return (
     <View style={s.thumb}>
-      {src ? (
-        // eslint-disable-next-line jsx-a11y/alt-text -- react-pdf Image has no alt prop
-        <Image src={src} style={s.thumbImg} />
-      ) : (
-        <View style={s.thumbPlaceholder}>
-          <Text style={s.thumbPlaceholderText}>No{'\n'}image</Text>
-        </View>
-      )}
+      {/* eslint-disable-next-line jsx-a11y/alt-text -- react-pdf Image has no alt prop */}
+      <Image src={src} style={s.thumbImg} />
     </View>
   );
 }
@@ -259,6 +258,12 @@ function Footer() {
   return (
     <View style={s.footer} fixed>
       <Text style={s.footerText}>Estate Comics · Powered by Legends of Superheros · Est. 1993</Text>
+      <Text
+        style={s.footerTagline}
+        render={({ pageNumber, totalPages }) =>
+          pageNumber === totalPages ? 'Every collection has a story. We honor it.' : ''
+        }
+      />
       <Text style={s.footerText} render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
     </View>
   );
@@ -300,6 +305,7 @@ function InnerPage({ data, children }: { data: ReportData; children: React.React
 
 function OpeningPage({ data }: { data: ReportData }) {
   const { summary, adjustment, seller } = data;
+  const held = summary.total_books_flagged;
   const eras = (
     [
       ['Golden Age', summary.breakdown_by_era.golden],
@@ -342,24 +348,22 @@ function OpeningPage({ data }: { data: ReportData }) {
       </View>
 
       <View style={s.cards}>
-        <View style={s.card}>
+        <View style={[s.card, s.cardNarrow]}>
           <Text style={s.cardLabel}>Books appraised</Text>
           <Text style={s.cardFigure}>{summary.total_books_identified}</Text>
-          {summary.total_books_flagged > 0 && (
-            <Text style={s.cardSub}>{summary.total_books_flagged} held for review</Text>
-          )}
+          {held > 0 && <Text style={s.cardSub}>{held} held for review</Text>}
         </View>
-        <View style={s.card}>
+        <View style={[s.card, s.cardWide]}>
           <Text style={s.cardLabel}>Fair market value</Text>
-          <Text style={s.cardFigureSm}>{fmt(summary.total_fmv_low)}</Text>
-          <Text style={s.cardFigureSm}>to {fmt(summary.total_fmv_high)}</Text>
+          <Text style={s.cardFigure}>{range(summary.total_fmv_low, summary.total_fmv_high)}</Text>
+          {held > 0 && <Text style={s.cardSub}>excluding books held for review</Text>}
         </View>
-        <View style={s.card}>
+        <View style={[s.card, s.cardWide]}>
           <Text style={s.cardLabel}>Cash offer range</Text>
-          <Text style={s.cardFigureSm}>{fmt(summary.total_offer_low)}</Text>
-          <Text style={s.cardFigureSm}>to {fmt(summary.total_offer_high)}</Text>
+          <Text style={s.cardFigure}>{range(summary.total_offer_low, summary.total_offer_high)}</Text>
+          {held > 0 && <Text style={s.cardSub}>excluding books held for review</Text>}
         </View>
-        <View style={s.card}>
+        <View style={[s.card, s.cardNarrow]}>
           <Text style={s.cardLabel}>Key issues</Text>
           <Text style={s.cardFigure}>{summary.key_issues_count}</Text>
           <Text style={s.cardSub}>
@@ -367,6 +371,21 @@ function OpeningPage({ data }: { data: ReportData }) {
           </Text>
         </View>
       </View>
+
+      {held > 0 && (
+        <View style={s.panel} wrap={false}>
+          <Text style={s.flagText}>
+            Pending verification — {held} {held === 1 ? 'book is' : 'books are'} not included in the ranges above
+          </Text>
+          <Text style={s.panelText}>
+            Our identification of {held === 1 ? 'this book' : 'these books'} did not meet the confidence
+            we require, so no offer is made on {held === 1 ? 'it' : 'them'} yet. {held === 1 ? 'It is' : 'They are'} listed
+            with provisional figures — fair market value {range(summary.pending_fmv_low, summary.pending_fmv_high)},
+            provisional offer {range(summary.pending_offer_low, summary.pending_offer_high)} — and a person
+            verifies {held === 1 ? 'it' : 'each one'} before any offer follows.
+          </Text>
+        </View>
+      )}
 
       <Text style={[s.p, { marginTop: space.block }]}>
         This report documents each book we identified from your photographs, our conservative
@@ -426,6 +445,7 @@ function OpeningPage({ data }: { data: ReportData }) {
 
 function BookEntry({ book, sentence }: { book: ReportBook; sentence: string | null }) {
   const { identification: id, condition: c, valuation: v, adjusted_offer: o } = book;
+  const held = isHeldForReview(book);
   return (
     <View style={s.bookRow} wrap={false}>
       <CoverThumb book={book} />
@@ -443,14 +463,18 @@ function BookEntry({ book, sentence }: { book: ReportBook; sentence: string | nu
         {sentence && <Text style={s.bookSentence}>{sentence}</Text>}
         <Text style={[s.bookMeta, { marginTop: 3 }]}>
           Grade {c.grade_label_low} – {c.grade_label_high} ({c.grade_low.toFixed(1)}–{c.grade_high.toFixed(1)})
-          {id.flagged_for_review ? '  ·  Held for review' : ''}
         </Text>
+        {held && (
+          <Text style={[s.flagText, { marginTop: 3 }]}>
+            Held for review — pending verification, not included in the headline range
+          </Text>
+        )}
       </View>
       <View style={s.bookFigures}>
-        <Text style={s.figLabel}>Fair market value</Text>
-        <Text style={s.figValue}>{range(v.fmv_low, v.fmv_high)}</Text>
-        <Text style={s.figLabel}>Our offer</Text>
-        <Text style={s.figValue}>{range(o.offer_low, o.offer_high)}</Text>
+        <Text style={s.figLabel}>{held ? 'Provisional value' : 'Fair market value'}</Text>
+        <Text style={[s.figValue, held ? { color: color.umber, fontWeight: 400 } : {}]}>{range(v.fmv_low, v.fmv_high)}</Text>
+        <Text style={s.figLabel}>{held ? 'Provisional offer' : 'Our offer'}</Text>
+        <Text style={[s.figValue, held ? { color: color.umber, fontWeight: 400 } : {}]}>{range(o.offer_low, o.offer_high)}</Text>
       </View>
     </View>
   );
@@ -516,6 +540,11 @@ const COL = { thumb: 34, title: 176, era: 44, grade: 70, fmv: 78, offer: 78, fla
 function InventoryPage({ data }: { data: ReportData }) {
   const gems = new Set<ReportBook>(selectHiddenGems(data.books));
   const listed = data.books.filter((b) => !b.adjusted_offer.is_bulk).sort(byFmvDesc);
+  // Same accessor as everywhere else: the column exists only if a cover exists.
+  const hasImages = listed.some((b) => resolveCoverImage(b) !== null);
+  const thumbW = hasImages ? COL.thumb : 0;
+  const titleW = COL.title + (hasImages ? 0 : COL.thumb);
+  const anyHeld = listed.some(isHeldForReview);
   const bulk = data.books.filter((b) => b.adjusted_offer.is_bulk);
   const bulkFmv = bulk.reduce((a, b) => ({ lo: a.lo + b.valuation.fmv_low, hi: a.hi + b.valuation.fmv_high }), { lo: 0, hi: 0 });
   const bulkOffer = bulk.reduce((a, b) => ({ lo: a.lo + b.adjusted_offer.offer_low, hi: a.hi + b.adjusted_offer.offer_high }), { lo: 0, hi: 0 });
@@ -529,8 +558,8 @@ function InventoryPage({ data }: { data: ReportData }) {
 
       {listed.length > 0 && (
         <View style={s.th} fixed>
-          <View style={{ width: COL.thumb }} />
-          <Text style={[s.thText, { width: COL.title }]}>Title</Text>
+          {hasImages && <View style={{ width: thumbW }} />}
+          <Text style={[s.thText, { width: titleW }]}>Title</Text>
           <Text style={[s.thText, { width: COL.era }]}>Era</Text>
           <Text style={[s.thText, { width: COL.grade }]}>Grade</Text>
           <Text style={[s.thText, { width: COL.fmv, textAlign: 'right' }]}>Fair value</Text>
@@ -541,32 +570,37 @@ function InventoryPage({ data }: { data: ReportData }) {
 
       {listed.map((book, i) => {
         const { identification: id, condition: c, valuation: v, adjusted_offer: o } = book;
-        const note = id.flagged_for_review
-          ? 'Review'
-          : gems.has(book)
-            ? 'Gem'
-            : o.tier === 'key_issues'
-              ? 'Key'
-              : '';
+        const held = isHeldForReview(book);
+        const note = held ? 'Held' : gems.has(book) ? 'Gem' : o.tier === 'key_issues' ? 'Key' : '';
+        const money = held ? { color: color.umber, fontWeight: 400 } : {};
         return (
           <View key={i} style={[s.tr, i % 2 === 0 ? s.trBase : s.trAlt]} wrap={false}>
-            <View style={{ width: COL.thumb }}>
-              <CoverThumb book={book} />
-            </View>
-            <View style={{ width: COL.title, paddingRight: 6 }}>
+            {hasImages && (
+              <View style={{ width: thumbW }}>
+                <CoverThumb book={book} />
+              </View>
+            )}
+            <View style={{ width: titleW, paddingRight: 6 }}>
               <Text style={[s.td, { fontWeight: 600 }]}>{id.title} #{id.issue_number}</Text>
               <Text style={s.tdMuted}>{id.publisher} · {id.cover_date}</Text>
             </View>
             <Text style={[s.td, { width: COL.era }]}>{id.era}</Text>
             <Text style={[s.td, { width: COL.grade }]}>{c.grade_low.toFixed(1)}–{c.grade_high.toFixed(1)}</Text>
-            <Text style={[s.tdNum, { width: COL.fmv }]}>{fmt(v.fmv_low)}–{fmt(v.fmv_high)}</Text>
-            <Text style={[s.tdNumStrong, { width: COL.offer }]}>{fmt(o.offer_low)}–{fmt(o.offer_high)}</Text>
-            <Text style={[s.tdMuted, { width: COL.flags, textAlign: 'right', color: id.flagged_for_review ? color.mutedRed : color.umber }]}>
+            <Text style={[s.tdNum, { width: COL.fmv }, money]}>{fmt(v.fmv_low)}–{fmt(v.fmv_high)}</Text>
+            <Text style={[s.tdNumStrong, { width: COL.offer }, money]}>{fmt(o.offer_low)}–{fmt(o.offer_high)}</Text>
+            <Text style={[s.tdMuted, { width: COL.flags, textAlign: 'right', color: held ? color.mutedRed : color.umber }]}>
               {note}
             </Text>
           </View>
         );
       })}
+
+      {anyHeld && (
+        <Text style={[s.tdMuted, { marginTop: space.tight }]}>
+          Held — pending verification: provisional figures, not included in the headline range
+          on the first page. An offer follows once a person has confirmed the identification.
+        </Text>
+      )}
 
       {bulk.length > 0 && (
         <View style={[s.panel, { marginTop: space.block }]} wrap={false}>
@@ -641,6 +675,16 @@ function MethodologyPage({ data }: { data: ReportData }) {
         calculated. That adjustment can lower an offer; it never raises one above what the
         photographs support.
       </Text>
+      <Text style={s.p}>
+        Books held for review. Where our identification of a book did not meet the confidence we
+        require, or the photograph was too unclear to be sure, the book is listed with a
+        provisional value but no offer is made on it, and it is excluded from the headline range
+        on the first page.{data.summary.total_books_flagged > 0
+          ? ` In this collection, ${data.summary.total_books_flagged} ${data.summary.total_books_flagged === 1 ? 'book is' : 'books are'} held for review.`
+          : ''}{' '}
+        A person verifies each held book, and an offer follows once the identification is
+        confirmed.
+      </Text>
 
       <View style={{ marginTop: space.gap }}>
         <Text style={s.h3}>Terms</Text>
@@ -653,9 +697,6 @@ function MethodologyPage({ data }: { data: ReportData }) {
         ))}
       </View>
 
-      <Text style={[s.subhead, { marginTop: space.section, textAlign: 'center' }]}>
-        Every collection has a story. We honor it.
-      </Text>
     </InnerPage>
   );
 }

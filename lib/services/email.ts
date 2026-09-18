@@ -172,6 +172,7 @@ function kvTable(rows: [string, string][]): string {
 export function renderSellerConfirmationHtml(data: ReportData): string {
   const { reference_number, generated_at, seller, summary } = data;
   const gems = summary.hidden_gems_count;
+  const held = summary.total_books_flagged;
   const steps: [string, string][] = [
     ['We review your appraisal', 'A member of our team checks every identification and value within 1–2 business days.'],
     ['We arrange a time', 'We call or email to schedule a collection time that suits you.'],
@@ -197,8 +198,18 @@ export function renderSellerConfirmationHtml(data: ReportData): string {
       ${statCard(
         'Cash offer range',
         `${fmt(summary.total_offer_low)} – ${fmt(summary.total_offer_high)}`,
-        `Based on ${summary.total_books_identified} identified ${summary.total_books_identified === 1 ? 'book' : 'books'} · fair market value ${fmt(summary.total_fmv_low)} – ${fmt(summary.total_fmv_high)}`,
+        `Based on ${summary.total_books_identified - held} ${summary.total_books_identified - held === 1 ? 'book' : 'books'} · fair market value ${fmt(summary.total_fmv_low)} – ${fmt(summary.total_fmv_high)}`,
       )}
+      ${
+        held > 0
+          ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${c.bisque};border-radius:2px;margin-top:8px;">
+        <tr><td style="padding:10px 14px;${textSm}color:${c.charcoalBrown};">
+          <strong style="color:${c.mutedRed};">${held} ${held === 1 ? 'book is' : 'books are'} held for review</strong> and not included in this range.
+          ${held === 1 ? 'Its' : 'Their'} provisional figures (offer ${fmt(summary.pending_offer_low)} – ${fmt(summary.pending_offer_high)}) are confirmed once a person verifies the identification.
+        </td></tr>
+      </table>`
+          : ''
+      }
 
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;border:1px solid ${c.bisque};border-radius:2px;">
         <tr>
@@ -302,6 +313,9 @@ export function renderInternalNotificationHtml(data: ReportData): string {
       ${sectionHead('Collection')}
       ${kvTable([
         ['Books identified', `${summary.total_books_identified}${summary.total_books_flagged > 0 ? ` · <span style="color:${c.mutedRed};font-weight:600;">${summary.total_books_flagged} held for review</span>` : ''}`],
+        ['Pending verification', summary.total_books_flagged > 0
+          ? `<span style="color:${c.mutedRed};font-weight:600;">${summary.total_books_flagged} ${summary.total_books_flagged === 1 ? 'book' : 'books'}</span> · provisional offer ${fmt(summary.pending_offer_low)} – ${fmt(summary.pending_offer_high)} · FMV ${fmt(summary.pending_fmv_low)} – ${fmt(summary.pending_fmv_high)} · excluded from the headline`
+          : 'None'],
         ['Key issues', String(summary.key_issues_count)],
         ['Hidden gems', String(hiddenGems.length)],
         ['Bulk lot', String(summary.bulk_lot_count)],

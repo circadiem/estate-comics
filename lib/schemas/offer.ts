@@ -22,6 +22,12 @@ export const CollectionSummarySchema = z.object({
   total_fmv_high: z.number().min(0),
   total_offer_low: z.number().min(0),
   total_offer_high: z.number().min(0),
+  /** Books held for review: listed and valued provisionally, but NOT offered
+   *  on and NOT in the headline totals above. Stated separately everywhere. */
+  pending_fmv_low: z.number().min(0),
+  pending_fmv_high: z.number().min(0),
+  pending_offer_low: z.number().min(0),
+  pending_offer_high: z.number().min(0),
   key_issues_count: z.number().int().min(0),
   hidden_gems_count: z.number().int().min(0),
   bulk_lot_count: z.number().int().min(0),

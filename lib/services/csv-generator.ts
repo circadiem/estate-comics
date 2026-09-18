@@ -4,7 +4,7 @@
 
 import Papa from 'papaparse';
 import type { ReportData, ReportBook } from '@/lib/types/report';
-import { selectHiddenGems } from '@/lib/services/offer';
+import { selectHiddenGems, isHeldForReview } from '@/lib/services/offer';
 
 export function generateCSV(data: ReportData): string {
   // Same capped selection as the PDF and emails (MAX_HIDDEN_GEMS)
@@ -65,6 +65,8 @@ export function generateCSV(data: ReportData): string {
     'Adjusted Offer Low': book.adjusted_offer.offer_low.toFixed(2),
     'Adjusted Offer High': book.adjusted_offer.offer_high.toFixed(2),
     'Adjusted Tier': book.adjusted_offer.tier_label,
+    // Held books are valued provisionally and excluded from the headline range
+    'Offer Status': isHeldForReview(book) ? 'Pending verification' : 'Offered',
 
     // Storage adjustment
     'FMV Multiplier': data.adjustment.fmv_multiplier.toFixed(3),
