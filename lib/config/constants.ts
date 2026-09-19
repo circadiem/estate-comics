@@ -46,8 +46,36 @@ export const MIN_IMAGE_HEIGHT = 480;
 // 200-book estate from rate-limit-storming the model API.
 export const PIPELINE_CONCURRENCY = 4;
 
-// Rate limiting — max requests per IP per hour (unauthenticated)
+// Rate limiting — max requests per IP per hour (unauthenticated).
+// Applies to the per-book pipeline routes in Stage 4 (WO-08).
 export const RATE_LIMIT_RPH = 50;
+
+// Upload rate limits (WO-08 task 1, pulled forward for /api/upload).
+// Sized for the real workload, not the pipeline default: a seller
+// photographing a 300-book estate uploads one object per book in a single
+// sitting, so 50/hour would block a legitimate submission at book 50. The
+// burst window is what actually bounds abuse — the pipeline never needs more
+// than PIPELINE_CONCURRENCY in flight, so 40/minute is generous.
+export const UPLOAD_RATE_LIMIT_RPM = 40;
+export const UPLOAD_RATE_LIMIT_RPH = 500;
+
+// Upload payload limits (WO-08 task 4).
+//
+// MAX_IMAGE_SIZE_BYTES (20 MB) is the limit on the file a seller PICKS. What
+// reaches /api/upload is the processed image: re-encoded to MAX_IMAGE_DIMENSION
+// at JPEG_QUALITY, typically a few hundred KB. These two caps bound what is
+// stored and what is read off the wire.
+//
+// The body cap is deliberately under Vercel's 4.5 MB serverless request-body
+// limit, so an oversized upload gets our own explanatory 413 rather than the
+// platform's opaque one. Budget: 2.5 MB image → 3.34 MB base64, plus a
+// thumbnail and the JSON envelope, inside 4 MB.
+//
+// If real submissions ever trip this, the fix is to lower JPEG_QUALITY or
+// MAX_IMAGE_DIMENSION, not to raise the cap past what the platform accepts.
+export const MAX_STORED_IMAGE_BYTES = Math.floor(2.5 * 1024 * 1024);
+export const MAX_STORED_THUMBNAIL_BYTES = 256 * 1024;
+export const MAX_UPLOAD_BODY_BYTES = 4 * 1024 * 1024;
 
 // API retry config (exponential backoff)
 export const MAX_RETRIES = 3;

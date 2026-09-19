@@ -35,14 +35,21 @@ migration — see the schema resolution in `docs/05-build-sequence.md`.)
 **Cloudflare R2.** Bucket `estatecomics-uploads`. Collect the account ID, access key ID, and
 secret. No photo is stored anywhere today — this is the fix.
 
+**Upstash Redis — now needed at the same time as R2, not in Stage 4.** `/api/upload` is the only
+unauthenticated write path to object storage, so it refuses every request unless a rate limiter
+is available. Collect the REST URL and token and set them alongside the R2 keys. If you set R2
+without these, uploads return 503 and the appraisal quietly falls back to sending photos inline —
+it keeps working, but no photo is stored and the admin queue will have no covers.
+(Turnstile and the daily spend cap remain Stage 4.)
+
 ---
 
 ## Before Stage 4 (public readiness)
 
 **Cloudflare Turnstile.** Site key and secret for bot protection on the submission form.
 
-**Upstash Redis.** For rate limiting. Collect the REST URL and token. The rate-limit constants
-already exist in the codebase; nothing consumes them.
+**Upstash Redis.** Already collected for R2 (see Stage 2 above). The Stage 4 work extends the
+same limiter to the per-book pipeline routes (`/api/identify`, `/api/grade`, `/api/valuate`).
 
 **Repo and project rename.** GitHub `thecomicbuyers` → `estatecomics`, then update the Vercel
 project to match. Do this when you have twenty quiet minutes, not mid-build — the rename breaks

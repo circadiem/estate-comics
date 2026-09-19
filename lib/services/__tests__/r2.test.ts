@@ -79,6 +79,22 @@ describe('/api/upload', () => {
     expect(await res.json()).toMatchObject({ error: 'storage_unavailable' });
   });
 
+  it('refuses when R2 is live but no rate limiter is configured (never runs open)', async () => {
+    vi.stubEnv('R2_ACCOUNT_ID', 'acct');
+    vi.stubEnv('R2_ACCESS_KEY_ID', 'key');
+    vi.stubEnv('R2_SECRET_ACCESS_KEY', 'secret');
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await post({ session_id: SESSION, image_id: IMAGE, image_base64: '/9j/AAAA' });
+      expect(res.status).toBe(503);
+      expect(await res.json()).toMatchObject({ error: 'rate_limiter_unavailable' });
+      expect(error).toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('request schema requires uuids and a body', () => {
     expect(UploadSchema.safeParse({ session_id: SESSION, image_id: IMAGE, image_base64: '/9j/' }).success).toBe(true);
     expect(UploadSchema.safeParse({ session_id: 'abc', image_id: IMAGE, image_base64: '/9j/' }).success).toBe(false);
